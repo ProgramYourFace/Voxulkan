@@ -3,7 +3,11 @@
 [Oo]bj/
 [Bb]uild/
 [Bb]uilds/
+[Ll]ogs/
+[Ll]og/
 Assets/AssetStoreTools*
+*/x64/
+x64/
 
 # Visual Studio cache directory
 .vs/
@@ -13,7 +17,7 @@ ExportedObj/
 .consulo/
 *.csproj
 *.unityproj
-*.sln
+Voxulkan.sln
 *.suo
 *.tmp
 *.user
