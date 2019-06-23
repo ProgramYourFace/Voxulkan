@@ -1,0 +1,8 @@
+﻿  D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Shaders\Chunk.vert
+  to D:\Projects_Unity\_GitHub\Voxulkan\Assets\Shaders\Resources\NativeShaders\Chunk.vert.bytes
+  D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Shaders\Chunk.frag
+  to D:\Projects_Unity\_GitHub\Voxulkan\Assets\Shaders\Resources\NativeShaders\Chunk.frag.bytes
+  D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Shaders\SphereVolume.comp
+  to D:\Projects_Unity\_GitHub\Voxulkan\Assets\Shaders\Resources\NativeShaders\SphereVolume.comp.bytes
+  Voxulkan-Native.vcxproj -> D:\Projects_Unity\_GitHub\Voxulkan\x64\Debug\GfxPluginVoxulkan-Native.dll
+          1 file(s) copied.
