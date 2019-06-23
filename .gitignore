@@ -6,7 +6,9 @@
 [Ll]ogs/
 [Ll]og/
 Assets/AssetStoreTools*
-*/x64/
+Voxulkan-Native/x64*
+Voxulkan-Native/Debug*
+Voxulkan-Native/.vs*
 x64/
 
 # Visual Studio cache directory
