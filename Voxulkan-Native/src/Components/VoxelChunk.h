@@ -4,6 +4,14 @@
 #include "..//Resources/GImage.h"
 #include "..//Resources/ComputePipeline.h"
 
+typedef enum VoxelChunkState {
+	VC_STATE_PREINITIALIZE = 0,
+	VC_STATE_VOLUME_FORMATION = 1,
+	VC_STATE_VISUAL_FORMATION = 2,
+	VC_STATE_IDLE = 3,
+	VC_STATE_DELETE = 0xFF
+} VoxelChunkState;
+
 struct VoxelChunk
 {
 	VoxelChunk();
@@ -29,6 +37,7 @@ struct VoxelChunk
 		uint8_t padding);
 	void ExecuteAnalysisStage(VkCommandBuffer commandBuffer);
 private:
+	std::atomic<VoxelChunkState> m_chunkState = VC_STATE_PREINITIALIZE;
 	float m_distance = 0.0f;
 	bool operator<(const VoxelChunk& rhs)const
 	{
@@ -36,9 +45,11 @@ private:
 	}
 };
 
-struct ChunkGenerationCommand
+struct ChunkStagingResources
 {
+	VoxelChunk* chunk;
 	VkDescriptorPool m_pool;
+
 	//Volume form stage
 	VkDescriptorSet m_volumeFormDSet;
 
@@ -46,6 +57,7 @@ struct ChunkGenerationCommand
 	VkDescriptorSet m_surfaceAnalysisDSet;
 	GBuffer m_surfaceCells;
 	GBuffer m_attributes;
+	VkEvent m_analysisCompleteEvent;
 
 	//Vertex assembly stage
 	VkDescriptorSet m_vertexAssemblyDSet;

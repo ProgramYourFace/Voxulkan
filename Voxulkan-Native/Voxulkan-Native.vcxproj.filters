@@ -94,13 +94,13 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <None Include="src\Shaders\Chunk.frag">
-      <Filter>Resource Files</Filter>
-    </None>
-    <None Include="src\Shaders\Chunk.vert">
-      <Filter>Resource Files</Filter>
-    </None>
     <None Include="src\Shaders\SphereVolume.comp">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="src\Shaders\Surface.frag">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="src\Shaders\Surface.vert">
       <Filter>Resource Files</Filter>
     </None>
   </ItemGroup>

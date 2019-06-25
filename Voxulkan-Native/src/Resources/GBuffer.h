@@ -3,7 +3,7 @@
 
 class Engine;
 
-struct GBufferHandle : GResourceHandle
+struct GBufferHandle : GPUResourceHandle
 {
 	VkBuffer m_buffer = VK_NULL_HANDLE;
 	VmaAllocation m_allocation = VK_NULL_HANDLE;

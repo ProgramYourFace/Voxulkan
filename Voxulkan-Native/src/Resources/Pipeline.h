@@ -1,7 +1,8 @@
 #pragma once
 #include "GResource.h"
+class Engine;
 
-struct PipelineHandle : public GResourceHandle
+struct PipelineHandle : public GPUResourceHandle
 {
 	VkPipelineLayout m_layout = VK_NULL_HANDLE;
 	VkPipeline m_pipeline = VK_NULL_HANDLE;
@@ -14,7 +15,7 @@ class Pipeline
 public:
 	void GetVkPipeline(VkPipeline& pipeline, VkPipelineLayout& layout);
 	virtual void Construct(VkDevice device) {};
-	virtual void Release();
+	virtual void Release(Engine* engine);
 
 	~Pipeline();
 protected:

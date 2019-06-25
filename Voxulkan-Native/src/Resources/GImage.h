@@ -3,7 +3,7 @@
 
 class Engine;
 
-struct GImageHandle : GResourceHandle
+struct GImageHandle : GPUResourceHandle
 {
 	VkImage m_image = VK_NULL_HANDLE;
 	VkImageView m_view = VK_NULL_HANDLE;

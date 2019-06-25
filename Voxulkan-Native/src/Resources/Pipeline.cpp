@@ -15,7 +15,7 @@ void Pipeline::GetVkPipeline(VkPipeline& pipeline, VkPipelineLayout& layout)
 	}
 }
 
-void Pipeline::Release()
+void Pipeline::Release(Engine* engine)
 {
 	SAFE_RELEASE_HANDLE(m_gpuHandle);
 }

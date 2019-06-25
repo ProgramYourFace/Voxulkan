@@ -2,9 +2,9 @@
 
 #include "../VMA.h"
 
-#define SAFE_RELEASE_HANDLE(handle) Engine::Get().SafeDestroyResource(handle); handle = nullptr
+#define SAFE_RELEASE_HANDLE(handle) engine->SafeDestroyResource(handle); handle = nullptr
 
-struct GResourceHandle
+struct GPUResourceHandle
 {
 	virtual void Dispose(VmaAllocator allocator) {};
 };
