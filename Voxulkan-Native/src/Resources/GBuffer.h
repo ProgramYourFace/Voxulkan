@@ -14,19 +14,11 @@ struct GBufferHandle : GResourceHandle
 class GBuffer : public GResource
 {
 public:
-	inline void SetMemoryUsage(const VmaMemoryUsage& memoryUsage) { m_memoryUsage = memoryUsage; }
-	inline void SetBufferUsage(const VkBufferUsageFlags& bufferUsage) { m_bufferUsage = bufferUsage; }
-	inline void SetByteCount(const VkDeviceSize& byteCount) { m_byteCount = byteCount; }
-
-	inline VkBuffer GetBuffer() { return m_gpuHandle ? m_gpuHandle->m_buffer : nullptr; }
-
 	void UploadData(VmaAllocator allocator, void* data, const size_t& byteCount);
 
 	void Allocate(VmaAllocator allocator) override;
 	void Release() override;
 
-	friend class Engine;
-private:
 	GBufferHandle* m_gpuHandle = nullptr;
 
 	//CreateInfo

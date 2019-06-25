@@ -233,7 +233,8 @@ void Engine::EnqueueComputeQueue(const VkQueue& queue)
 
 void Engine::SetChunkShaders(const std::vector<char>& vertex, const std::vector<char>& fragment)
 {
-	m_chunkPipeline->SetShaders(vertex, fragment);
+	m_chunkPipeline->m_vertexShader = vertex;
+	m_chunkPipeline->m_fragmentShader = fragment;
 }
 
 
@@ -264,14 +265,14 @@ void Engine::OnDeviceInitialize()
 	//Construct chunk pipeline
 	SAFE_DELETE(m_chunkPipeline);
 	m_chunkPipeline = new RenderPipeline();
-	m_chunkPipeline->SetCullMode(VK_CULL_MODE_NONE);
-	m_chunkPipeline->SetWireframe(true);
+	m_chunkPipeline->m_cullMode = VK_CULL_MODE_NONE;
+	m_chunkPipeline->m_wireframe = false;
 
 	std::vector<VkPushConstantRange> pushConstants(1);
 	pushConstants[0].offset = 0;
 	pushConstants[0].size = 64; // single matrix
 	pushConstants[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-	m_chunkPipeline->SetPushConstants(pushConstants);
+	m_chunkPipeline->m_pushConstants = pushConstants;
 
 	std::vector<VkVertexInputBindingDescription> vertexBindings(1);
 	vertexBindings[0].binding = 0;
@@ -288,13 +289,14 @@ void Engine::OnDeviceInitialize()
 	vertexAttributes[1].format = VK_FORMAT_R8G8B8A8_UNORM;
 	vertexAttributes[1].offset = 12;
 
-	m_chunkPipeline->SetVertexLayout(vertexBindings, vertexAttributes);
+	m_chunkPipeline->m_vertexBindings = vertexBindings;
+	m_chunkPipeline->m_vertexAttributes = vertexAttributes;
 
 	
 	SAFE_DELETE(m_triangleBuffer);
 	m_triangleBuffer = new GBuffer();
-	m_triangleBuffer->SetMemoryUsage(VMA_MEMORY_USAGE_CPU_TO_GPU);
-	m_triangleBuffer->SetBufferUsage(VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+	m_triangleBuffer->m_memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+	m_triangleBuffer->m_bufferUsage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
 
 	struct MyVertex
 	{
@@ -308,7 +310,7 @@ void Engine::OnDeviceInitialize()
 		{ 0,     0.5f ,  0.0f, 0xFF0000ff },
 	};
 
-	m_triangleBuffer->SetByteCount(sizeof(verts));
+	m_triangleBuffer->m_byteCount = sizeof(verts);
 	m_triangleBuffer->Allocate(m_allocator);
 	m_triangleBuffer->UploadData(m_allocator, verts, sizeof(verts));
 	
@@ -334,12 +336,12 @@ void Engine::Draw(Camera* camera)
 	
 	VkPipeline pipeline;
 	VkPipelineLayout layout;
-	m_chunkPipeline->ConstructWithRP(m_instance.device, recordingState.renderPass);
+	m_chunkPipeline->ConstructOnRenderPass(m_instance.device, recordingState.renderPass);
 	m_chunkPipeline->GetVkPipeline(pipeline, layout);
 	
-	if (pipeline && layout)
+	if (pipeline && layout && m_triangleBuffer->m_gpuHandle)
 	{
-		VkBuffer buffer = m_triangleBuffer->GetBuffer();
+		VkBuffer buffer = m_triangleBuffer->m_gpuHandle->m_buffer;
 		if (buffer)
 		{
 			glm::mat4x4 mvp = camera->m_VP_Matrix.load(std::memory_order_relaxed);
@@ -377,8 +379,11 @@ void Engine::RunCompute(const std::vector<char>& shader)
 {
 	LOG("Running compute...");
 
+	const uint32_t CHUNK_SIZE = 32;
+	const uint32_t CHUNK_CUBED = CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE;
+
 	ComputePipeline cp;
-	cp.SetShader(shader);
+	cp.m_shader = shader;
 
 	//Configure bindings
 	VkDescriptorSetLayoutBinding dslImageBinding = {};
@@ -396,7 +401,7 @@ void Engine::RunCompute(const std::vector<char>& shader)
 	std::vector<VkDescriptorSetLayout> descriptorSetLayouts(1);
 
 	VK_CALL(vkCreateDescriptorSetLayout(m_instance.device, &dslCInfo, nullptr, descriptorSetLayouts.data()));
-	cp.SetDescriptorSetLayouts(descriptorSetLayouts);
+	cp.m_descriptorSetLayouts = descriptorSetLayouts;
 	cp.Construct(m_instance.device);
 
 	//Access descriptors
@@ -439,11 +444,11 @@ void Engine::RunCompute(const std::vector<char>& shader)
 	VK_CALL(vkBeginCommandBuffer(cb, &cbBeginInfo));
 
 	GImage image;
-	image.SetType(VK_IMAGE_TYPE_3D);
-	image.SetUsage(VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
-	image.SetFormat(VK_FORMAT_R8G8B8A8_UNORM);
-	//image.SetMemoryUsage(VMA_MEMORY_USAGE_GPU_TO_CPU);
-	image.SetSize(32, 32, 32);
+	image.m_type = VK_IMAGE_TYPE_3D;
+	image.m_usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	image.m_format = VK_FORMAT_R8G8B8A8_UNORM;
+	image.m_memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY;
+	image.m_size = { CHUNK_SIZE, CHUNK_SIZE, CHUNK_SIZE };
 
 	image.Allocate(m_allocator);
 	VkImage vkImg = image.GetImage();
@@ -486,16 +491,20 @@ void Engine::RunCompute(const std::vector<char>& shader)
 		0, nullptr,
 		1, &imgBarrier);
 	
+	VkPipeline pipeline;
+	VkPipelineLayout layout;
+	cp.GetVkPipeline(pipeline, layout);
+
 	vkCmdBindDescriptorSets(cb,
 		VK_PIPELINE_BIND_POINT_COMPUTE,
-		cp.m_gpuHandle->m_layout,
+		layout,
 		0,
 		1,
 		&descSet,
 		0,
 		nullptr);
 
-	vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, cp.m_gpuHandle->m_pipeline);
+	vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
 	vkCmdDispatch(cb, 8, 8, 8);
 
 	VkImageMemoryBarrier transferBarrier = imgBarrier;
@@ -524,12 +533,12 @@ void Engine::RunCompute(const std::vector<char>& shader)
 	copy.imageSubresource.mipLevel = 0;
 
 	GBuffer stagingBuffer;
-	stagingBuffer.SetBufferUsage(VK_BUFFER_USAGE_TRANSFER_DST_BIT);
-	stagingBuffer.SetByteCount(32 * 32 * 32 * sizeof(int));
-	stagingBuffer.SetMemoryUsage(VMA_MEMORY_USAGE_GPU_TO_CPU);
+	stagingBuffer.m_bufferUsage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	stagingBuffer.m_byteCount = CHUNK_CUBED * sizeof(int);
+	stagingBuffer.m_memoryUsage = VMA_MEMORY_USAGE_GPU_TO_CPU;
 	stagingBuffer.Allocate(m_allocator);
 
-	vkCmdCopyImageToBuffer(cb, vkImg, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, stagingBuffer.GetBuffer(), 1, &copy);
+	vkCmdCopyImageToBuffer(cb, vkImg, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, stagingBuffer.m_gpuHandle->m_buffer, 1, &copy);
 
 	VK_CALL(vkEndCommandBuffer(cb));
 
@@ -544,14 +553,14 @@ void Engine::RunCompute(const std::vector<char>& shader)
 	{
 		BYTE r, g, b, a;
 	};
-	color8* data = new color8[32 * 32 * 32];
+	color8* data = new color8[CHUNK_CUBED];
 	void* mappedData;
 	vmaMapMemory(m_allocator, stagingBuffer.m_gpuHandle->m_allocation, &mappedData);
-	memcpy(data, mappedData, 32 * 32 * 32 * sizeof(color8));
+	memcpy(data, mappedData, CHUNK_CUBED * sizeof(color8));
 	vmaUnmapMemory(m_allocator, stagingBuffer.m_gpuHandle->m_allocation);
 
 
-	color8 c0 = data[32 * 32 * 32 - 1];
+	color8 c0 = data[CHUNK_CUBED - 1];
 	std::stringstream ss;
 	ss << "(r: "  << std::to_string(c0.r);
 	ss << ", g: " << std::to_string(c0.g);

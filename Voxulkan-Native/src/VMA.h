@@ -33,6 +33,7 @@ include all public interface declarations. Example:
 #pragma warning(disable: 4100) // unreferenced formal parameter
 #pragma warning(disable: 4189) // local variable is initialized but not referenced
 
+#include <vulkan/vulkan.h>
 #include "vk_mem_alloc.h"
 
 #pragma warning(pop)

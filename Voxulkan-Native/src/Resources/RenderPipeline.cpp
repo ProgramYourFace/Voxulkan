@@ -2,7 +2,7 @@
 #include "..//Plugin.h"
 #include "..//Engine.h"
 
-void RenderPipeline::ConstructWithRP(VkDevice device, VkRenderPass renderPass)
+void RenderPipeline::ConstructOnRenderPass(VkDevice device, VkRenderPass renderPass)
 {
 	if (device && renderPass)
 	{
