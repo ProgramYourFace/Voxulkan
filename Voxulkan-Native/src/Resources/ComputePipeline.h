@@ -1,13 +1,12 @@
 #pragma once
 #include <vector>
 #include "Pipeline.h"
-#include "GResource.h"
 
 class ComputePipeline : public Pipeline
 {
 public:
-	void Construct(VkDevice device) override;
-	void Release() override;
+	void Construct(Engine* instance) override;
+	void Release(Engine* instance) override;
 
 	//Layout info
 	std::vector<VkPushConstantRange> m_pushConstants;

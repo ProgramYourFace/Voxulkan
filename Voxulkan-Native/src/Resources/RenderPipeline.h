@@ -1,13 +1,12 @@
 #pragma once
 #include <vector>
 #include "Pipeline.h"
-#include "GResource.h"
 
 class RenderPipeline : public Pipeline
 {
 public:
-	void ConstructOnRenderPass(VkDevice device, VkRenderPass renderPass);
-	void Construct(VkDevice device) override;
+	void ConstructOnRenderPass(Engine* instance, VkRenderPass renderPass);
+	void Construct(Engine* instance) override;
 
 	//Layout info
 	std::vector<VkPushConstantRange> m_pushConstants;

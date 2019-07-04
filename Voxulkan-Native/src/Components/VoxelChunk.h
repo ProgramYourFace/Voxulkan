@@ -1,15 +1,17 @@
 #pragma once
 #include "glm/glm.hpp"
-#include "..//Resources/GBuffer.h"
-#include "..//Resources/GImage.h"
+#include "..//Resources/GPUBuffer.h"
+#include "..//Resources/GPUImage.h"
 #include "..//Resources/ComputePipeline.h"
+
+class Engine;
 
 typedef enum VoxelChunkState {
 	VC_STATE_PREINITIALIZE = 0,
 	VC_STATE_VOLUME_FORMATION = 1,
 	VC_STATE_VISUAL_FORMATION = 2,
 	VC_STATE_IDLE = 3,
-	VC_STATE_DELETE = 0xFF
+	VC_STATE_DELETE = DEALLOC_STATE
 } VoxelChunkState;
 
 struct VoxelChunk
@@ -21,12 +23,12 @@ struct VoxelChunk
 	uint8_t m_subdivisionCount = 0;
 	VoxelChunk* m_subChunks = nullptr;
 
-	GImage m_volumeImage;
-	GBuffer m_triangleBuffer;
-	GBuffer m_vertexBuffer;
-	GBuffer m_argsBuffer;
+	GPUImage m_volumeImage;
+	GPUBuffer m_triangleBuffer;
+	GPUBuffer m_vertexBuffer;
+	GPUBuffer m_argsBuffer;
 
-	void AllocateVolume(VmaAllocator allocator, const glm::uvec3& size, uint8_t padding);
+	void AllocateVolume(Engine* instance, const glm::uvec3& size, uint8_t padding);
 	void ApplyForm(VkCommandBuffer commandBuffer,
 		ComputePipeline* computePipeline,
 		VkDescriptorSet resources,
@@ -45,23 +47,38 @@ private:
 	}
 };
 
-struct ChunkStagingResources
+struct SurfaceAttributes
 {
-	VoxelChunk* chunk;
-	VkDescriptorPool m_pool;
+	uint32_t cellCount;
+	uint32_t vertexCount;
+	uint32_t indexCount;
+};
 
-	//Volume form stage
-	VkDescriptorSet m_volumeFormDSet;
+struct ChunkStagingResources : public GPUResourceHandle
+{
+	ChunkStagingResources(Engine* instance, uint8_t size, uint8_t padding);
 
-	//Surface analysis stage
-	VkDescriptorSet m_surfaceAnalysisDSet;
-	GBuffer m_surfaceCells;
-	GBuffer m_attributes;
-	VkEvent m_analysisCompleteEvent;
+	//Staging
+	VkDescriptorSet m_formDSet = VK_NULL_HANDLE;
+	VkDescriptorSet m_analysisDSet = VK_NULL_HANDLE;
+	VkDescriptorSet m_assemblyDSet = VK_NULL_HANDLE;
 
-	//Vertex assembly stage
-	VkDescriptorSet m_vertexAssemblyDSet;
+	GPUImage m_colorMap = {};
+	GPUImage m_indexMap = {};
+	GPUBuffer m_cells = {};
+	GPUBuffer m_attributes = {};
+	GPUBuffer m_attributesSB = {};
+	VkEvent m_analysisCompleteEvent = VK_NULL_HANDLE;
 
-	//Triangle assembly stage
-	VkDescriptorSet m_triangleAssemblyDSet;
+	//Output
+	GPUImage m_density = {};
+	GPUBuffer m_verticies = {};
+	GPUBuffer m_indicies = {};
+
+	void AllocateDescriptors(Engine* instance,
+		VkDescriptorPool descriptorPool,
+		VkDescriptorSetLayout formDSetLayout,
+		VkDescriptorSetLayout analysisDSetLayout,
+		VkDescriptorSetLayout assemblyDSetLayout);
+	void Deallocate(Engine* instance) override;
 };

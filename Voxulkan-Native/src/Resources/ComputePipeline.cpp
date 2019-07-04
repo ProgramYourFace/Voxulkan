@@ -2,13 +2,19 @@
 #include "..//Plugin.h"
 #include "..//Engine.h"
 
-void ComputePipeline::Construct(VkDevice device)
+void ComputePipeline::Construct(Engine* instance)
 {
-	Release();
-	if (!device)
+	if (m_gpuHandle)
+	{
+		LOG("Compute Pipeline creation failed! Already allocated!");
+		return;
+	}
+	if (!instance)
 		return;
 
 	VkShaderModule shaderModule = VK_NULL_HANDLE;
+
+	VkDevice device = instance->Device();
 
 	VkShaderModuleCreateInfo moduleCreateInfo = {};
 	moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -49,12 +55,12 @@ void ComputePipeline::Construct(VkDevice device)
 
 	if (!success)
 	{
-		SAFE_DELETE(m_gpuHandle);
+		SAFE_DEL(m_gpuHandle);
 		LOG("Pipleline creation failed!");
 	}
 }
 
-void ComputePipeline::Release()
+void ComputePipeline::Release(Engine* instance)
 {
-	SAFE_RELEASE_HANDLE(m_gpuHandle);
+	SAFE_DESTROY(m_gpuHandle);
 }

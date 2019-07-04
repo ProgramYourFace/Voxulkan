@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 16
-VisualStudioVersion = 16.0.28922.388
+VisualStudioVersion = 16.0.29020.237
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Voxulkan-Native", "Voxulkan-Native\Voxulkan-Native.vcxproj", "{2954E9D0-E56A-43B5-9F38-D4EFDBADBB96}"
 EndProject
@@ -26,6 +26,6 @@ Global
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {275D6B36-8249-4514-A07C-0EF47546B9E0}
+		SolutionGuid = {1F6074ED-0577-4633-9C9A-83892F827006}
 	EndGlobalSection
 EndGlobal

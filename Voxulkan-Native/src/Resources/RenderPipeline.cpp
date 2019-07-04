@@ -2,23 +2,23 @@
 #include "..//Plugin.h"
 #include "..//Engine.h"
 
-void RenderPipeline::ConstructOnRenderPass(VkDevice device, VkRenderPass renderPass)
+void RenderPipeline::ConstructOnRenderPass(Engine* instance, VkRenderPass renderPass)
 {
-	if (device && renderPass)
+	if (instance && renderPass)
 	{
 		if (m_registeredPass != renderPass)
 		{
-			Release();
+			Release(instance);
 			m_registeredPass = renderPass;
-			Construct(device);
+			Construct(instance);
 		}
 	}
 }
 
-void RenderPipeline::Construct(VkDevice device)
+void RenderPipeline::Construct(Engine* instance)
 {
-	Release();
-	if (!m_registeredPass || !device)
+
+	if (!m_registeredPass || !instance)
 		return;
 
 	VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo = {};
@@ -29,7 +29,7 @@ void RenderPipeline::Construct(VkDevice device)
 	pipelineLayoutCreateInfo.setLayoutCount = 0;
 
 	m_gpuHandle = new PipelineHandle();
-
+	VkDevice device = instance->Device();
 	bool success = vkCreatePipelineLayout(device, &pipelineLayoutCreateInfo, NULL, &m_gpuHandle->m_layout) == VK_SUCCESS;
 
 	VkGraphicsPipelineCreateInfo pipelineCreateInfo = {};
@@ -140,7 +140,7 @@ void RenderPipeline::Construct(VkDevice device)
 
 	if (!success)
 	{
-		SAFE_DELETE(m_gpuHandle);
+		SAFE_DEL(m_gpuHandle);
 		LOG("Pipleline creation failed!");
 	}
 }

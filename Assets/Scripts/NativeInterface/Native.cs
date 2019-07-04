@@ -23,12 +23,24 @@ namespace Voxulkan
         public delegate void LogCallback(string msg);
 
         [DllImport(DLL)]
-        public static extern bool IsInitialized();
-        [DllImport(DLL)]
         public static extern void RegisterLogCallback(LogCallback callback);
         [DllImport(DLL)]
-        public static extern void SetChunkShaders(byte[] vertexShader, int vsSize, byte[] fragmentShader, int fsSize);
-
+        public static extern void SetSurfaceShaders(IntPtr instance,
+            byte[] vertexShader, int vsSize,
+            byte[] fragmentShader, int fsSize);
+        [DllImport(DLL)]
+        public static extern void SetComputeShaders(IntPtr instance,
+            byte[] surfaceAnalysis, int saSize,
+            byte[] vertexAssembly, int vaSize,
+            byte[] triangleAssembly, int taSize);
+        [DllImport(DLL)]
+        public static extern void CreateVoxulkanInstance(ref IntPtr instance);
+        [DllImport(DLL)]
+        public static extern void DestroyVoxulkanInstance(ref IntPtr instance);
+        [DllImport(DLL)]
+        public static extern void InitializeVoxulkanInstance(IntPtr instance);
+        [DllImport(DLL)]
+        public static extern void InvokeGC(IntPtr instance);
         public static byte[] LoadShaderBytes(string shaderName)
         {
             return Resources.Load<TextAsset>("NativeShaders/" + shaderName).bytes;

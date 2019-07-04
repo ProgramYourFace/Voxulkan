@@ -1,9 +1,9 @@
 #include "Engine.h"
 #include "Plugin.h"
+#include "Components/VoxelBody.h"
 #include <sstream>
 #include <vector>
 #include <thread>
-#include <algorithm>
 
 Engine::Engine(IUnityGraphicsVulkan* unityVulkan)
 {
@@ -22,7 +22,7 @@ void Engine::RegisterComputeQueues(std::vector<VkQueue> queues, const uint32_t& 
 		return;
 
 	m_computeQueueFamily = queueFamily;
-	m_queueCount = queues.size();
+	m_queueCount = static_cast<uint8_t>(queues.size());
 	m_workerCount = GetWorkerCount();
 	if (m_workerCount < m_queueCount)
 	{
@@ -76,97 +76,66 @@ void Engine::RegisterComputeQueues(std::vector<VkQueue> queues, const uint32_t& 
 	}
 }
 
-void Engine::SetChunkShaders(const std::vector<char>& vertex, const std::vector<char>& fragment)
+void Engine::SetSurfaceShaders(const std::vector<char>& vertex, const std::vector<char>& fragment)
 {
-	m_renderPipeline->m_vertexShader = vertex;
-	m_renderPipeline->m_fragmentShader = fragment;
+	m_renderPipeline.m_vertexShader = vertex;
+	m_renderPipeline.m_fragmentShader = fragment;
+}
+
+void Engine::SetComputeShaders(const std::vector<char>& surfaceAnalysis, const std::vector<char>& surfaceAssembly)
+{
+	m_surfaceAnalysisPipeline.m_shader = surfaceAnalysis;
+	m_surfaceAssemblyPipeline.m_shader = surfaceAssembly;
 }
 
 void Engine::InitializeResources()
 {
-
-	m_currentFrame.store(0);
-
-	//Construct chunk pipeline
-	SAFE_DELETE(m_renderPipeline);
-	m_renderPipeline = new RenderPipeline();
-	m_renderPipeline->m_cullMode = VK_CULL_MODE_NONE;
-	m_renderPipeline->m_wireframe = false;
-
-	std::vector<VkPushConstantRange> pushConstants(1);
-	pushConstants[0].offset = 0;
-	pushConstants[0].size = 64; // single matrix
-	pushConstants[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-	m_renderPipeline->m_pushConstants = pushConstants;
-
-	std::vector<VkVertexInputBindingDescription> vertexBindings(1);
-	vertexBindings[0].binding = 0;
-	vertexBindings[0].stride = 16;
-	vertexBindings[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-
-	std::vector<VkVertexInputAttributeDescription> vertexAttributes(2);
-	vertexAttributes[0].binding = 0;
-	vertexAttributes[0].location = 0;
-	vertexAttributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-	vertexAttributes[0].offset = 0;
-	vertexAttributes[1].binding = 0;
-	vertexAttributes[1].location = 1;
-	vertexAttributes[1].format = VK_FORMAT_R8G8B8A8_UNORM;
-	vertexAttributes[1].offset = 12;
-
-	m_renderPipeline->m_vertexBindings = vertexBindings;
-	m_renderPipeline->m_vertexAttributes = vertexAttributes;
-
+	m_loadingFrame.store(0);
+	InitializeRenderPipeline();
+	InitializeComputePipelines();
+	InitializeStagingResources(10); //TODO: Replace constant with variable
 	
-	SAFE_DELETE(m_triangleBuffer);
-	m_triangleBuffer = new GBuffer();
-	m_triangleBuffer->m_memoryUsage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-	m_triangleBuffer->m_bufferUsage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+	m_testVB = new VoxelBody({ 0.0f,0.0f,0.0f }, {16.0f,16.0f,16.0f});
 
-	struct MyVertex
-	{
-		float x, y, z;
-		unsigned int color;
-	};
-	MyVertex verts[3] =
-	{
-		{ -0.5f, -0.25f,  0.0f, 0xFFff0000 },
-		{ 0.5f, -0.25f,  0.0f, 0xFF00ff00 },
-		{ 0,     0.5f ,  0.0f, 0xFF0000ff },
-	};
-
-	m_triangleBuffer->m_byteCount = sizeof(verts);
-	m_triangleBuffer->Allocate(m_allocator);
-	m_triangleBuffer->UploadData(m_allocator, verts, sizeof(verts));
-	
-	GarbageCollect(true);
+	GarbageCollect(GC_FORCE_COMPLETE);
 }
 
 void Engine::ReleaseResources()
 {
-	SAFE_DELETE_RES(m_renderPipeline);
-	SAFE_DELETE_RES(m_triangleBuffer);
+	SAFE_DEL(m_testVB);
+	ReleaseStagingResources();
 
-	GarbageCollect(true);
+	m_renderPipeline.Release(this);
+	m_surfaceAnalysisPipeline.Release(this);
+	m_surfaceAssemblyPipeline.Release(this);
+	if (m_formDSetLayout)
+		vkDestroyDescriptorSetLayout(m_instance.device, m_formDSetLayout, nullptr);
+
+	GarbageCollect(GC_FORCE_COMPLETE);
 	vmaDestroyAllocator(m_allocator);
 	vkDestroyCommandPool(m_instance.device, m_computeCmdPool, nullptr);
 }
 
 void Engine::Draw(Camera* camera)
 {
-	UpdateCurrentFrame();
+	m_testVB->Traverse(this, 0);
+
 	UnityVulkanRecordingState recordingState;
 	if (!m_unityVulkan->CommandRecordingState(&recordingState, kUnityVulkanGraphicsQueueAccess_DontCare))
 		return;
+
+	m_loadingFrame.store(recordingState.currentFrameNumber);
+	m_dumpFrame.store(recordingState.safeFrameNumber - SAFE_DUMP_MARGIN);
 	
 	VkPipeline pipeline;
 	VkPipelineLayout layout;
-	m_renderPipeline->ConstructOnRenderPass(m_instance.device, recordingState.renderPass);
-	m_renderPipeline->GetVkPipeline(pipeline, layout);
+	m_renderPipeline.ConstructOnRenderPass(this, recordingState.renderPass);
+	m_renderPipeline.GetVkPipeline(pipeline, layout);
 	
-	if (pipeline && layout && m_triangleBuffer->m_gpuHandle)
+	if (pipeline && layout)
 	{
-		VkBuffer buffer = m_triangleBuffer->m_gpuHandle->m_buffer;
+		/*
+		VkBuffer buffer = m_triangleBuffer.m_gpuHandle->m_buffer;
 		if (buffer)
 		{
 			glm::mat4x4 mvp = camera->m_VP_Matrix.load(std::memory_order_relaxed);
@@ -179,23 +148,12 @@ void Engine::Draw(Camera* camera)
 		else
 		{
 			LOG("buffer is null");
-		}
+		}*/
 	}
 	else
 	{
 		LOG("pipeline or layout is null");
 	}
-	GarbageCollect();
-}
-
-void Engine::UpdateCurrentFrame()
-{
-	UnityVulkanRecordingState recordingState;
-
-	if (!m_unityVulkan->CommandRecordingState(&recordingState, kUnityVulkanGraphicsQueueAccess_DontCare))
-		return;
-
-	m_currentFrame.store(recordingState.currentFrameNumber);
 }
 /*
 #include "Resources/GImage.h"
@@ -406,44 +364,15 @@ void Engine::RunCompute(const std::vector<char>& shader)
 	LOG("Compute finished!...");
 }*/
 
-void Engine::SafeDestroyResource(GPUResourceHandle* resource)
-{
-	SafeDestroyResource(m_currentFrame.load(), resource);
-}
-
-void Engine::SafeDestroyResource(const unsigned long long& frameNumber, GPUResourceHandle* resource)
+void Engine::DestroyResource(GPUResourceHandle* resource)
 {
 	if (resource)
-	{
-		m_deleteQueue[frameNumber].push_back(resource);
-	}
+		m_loadingGarbage.add(resource);
 }
 
-void Engine::GarbageCollect(bool force)
+void Engine::DestroyResources(const std::vector<GPUResourceHandle*>& resources)
 {
-	UnityVulkanRecordingState recordingState;
-	if (force)
-		recordingState.safeFrameNumber = ~0ull;
-	else
-		if (!m_unityVulkan->CommandRecordingState(&recordingState, kUnityVulkanGraphicsQueueAccess_DontCare))
-			return;
-
-	DeleteQueue::iterator it = m_deleteQueue.begin();
-	while (it != m_deleteQueue.end())
-	{
-		if (it->first <= recordingState.safeFrameNumber)
-		{
-			for (size_t i = 0; i < it->second.size(); ++i)
-			{
-				
-				it->second[i]->Dispose(m_allocator);
-				SAFE_DELETE(it->second[i]);
-			}
-			m_deleteQueue.erase(it++);
-		}
-		else
-			++it;
-	}
+	m_loadingGarbage.add(resources);
 }
 
 uint8_t Engine::GetWorkerCount()
@@ -451,18 +380,239 @@ uint8_t Engine::GetWorkerCount()
 	return std::thread::hardware_concurrency() - 1;;
 }
 
+void Engine::InitializeRenderPipeline()
+{
+	//Construct chunk pipeline
+	m_renderPipeline.Release(this);
+	m_renderPipeline.m_cullMode = VK_CULL_MODE_NONE;
+	m_renderPipeline.m_wireframe = false;
+
+	std::vector<VkPushConstantRange> pushConstants(1);
+	pushConstants[0].offset = 0;
+	pushConstants[0].size = 64; // single matrix
+	pushConstants[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	m_renderPipeline.m_pushConstants = pushConstants;
+
+	std::vector<VkVertexInputBindingDescription> vertexBindings(1);
+	vertexBindings[0].binding = 0;
+	vertexBindings[0].stride = 16;
+	vertexBindings[0].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+	std::vector<VkVertexInputAttributeDescription> vertexAttributes(2);
+	vertexAttributes[0].binding = 0;
+	vertexAttributes[0].location = 0;
+	vertexAttributes[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+	vertexAttributes[0].offset = 0;
+	vertexAttributes[1].binding = 0;
+	vertexAttributes[1].location = 1;
+	vertexAttributes[1].format = VK_FORMAT_R8G8B8A8_UNORM;
+	vertexAttributes[1].offset = 12;
+
+	m_renderPipeline.m_vertexBindings = vertexBindings;
+	m_renderPipeline.m_vertexAttributes = vertexAttributes;
+}
+
+void Engine::InitializeComputePipelines()
+{
+	m_surfaceAnalysisPipeline.Release(this);
+	m_surfaceAssemblyPipeline.Release(this);
+	if (m_formDSetLayout)
+		vkDestroyDescriptorSetLayout(m_instance.device, m_formDSetLayout, nullptr);
+
+	//Volume image
+	//Index map image
+	//Surface Cells buffer
+	//Stats buffer
+	//Vert buffer
+	//Tri buffer
+	std::vector<VkDescriptorSetLayoutBinding> bindings(6);
+
+	//Color map
+	bindings[0].binding = 0;
+	bindings[0].pImmutableSamplers = 0;
+	bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	bindings[0].descriptorCount = 1;
+	bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	VkDescriptorSetLayoutCreateInfo layoutCI = {};
+	layoutCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layoutCI.bindingCount = 1;
+	layoutCI.pBindings = bindings.data();
+
+	VK_CALL(vkCreateDescriptorSetLayout(m_instance.device,
+		&layoutCI,
+		nullptr,
+		&m_formDSetLayout));
+
+	bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+	//Index map
+	bindings[1].binding = 1;
+	bindings[1].pImmutableSamplers = 0;
+	bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	bindings[1].descriptorCount = 1;
+	bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	//Cells
+	bindings[2].binding = 2;
+	bindings[2].pImmutableSamplers = 0;
+	bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	bindings[2].descriptorCount = 1;
+	bindings[2].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	//Attributes
+	bindings[3].binding = 3;
+	bindings[3].pImmutableSamplers = 0;
+	bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	bindings[3].descriptorCount = 1;
+	bindings[3].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	//Create layouts
+	layoutCI.bindingCount = 4;
+
+	m_surfaceAnalysisPipeline.m_descriptorSetLayouts = std::vector<VkDescriptorSetLayout>(1);
+	VK_CALL(vkCreateDescriptorSetLayout(m_instance.device,
+		&layoutCI,
+		nullptr,
+		m_surfaceAnalysisPipeline.m_descriptorSetLayouts.data()));
+
+	m_surfaceAnalysisPipeline.Construct(this);
+
+	//Read only
+	//Index map read only
+	bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+	//Cells read only
+	bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+
+	//Vertex buffer
+	bindings[4].binding = 4;
+	bindings[4].pImmutableSamplers = 0;
+	bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	bindings[4].descriptorCount = 1;
+	bindings[4].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	//Index buffer
+	bindings[5].binding = 5;
+	bindings[5].pImmutableSamplers = 0;
+	bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	bindings[5].descriptorCount = 1;
+	bindings[5].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+
+	layoutCI.bindingCount = 6;
+	m_surfaceAssemblyPipeline.m_descriptorSetLayouts = std::vector<VkDescriptorSetLayout>(1);
+	VK_CALL(vkCreateDescriptorSetLayout(m_instance.device,
+		&layoutCI,
+		nullptr,
+		m_surfaceAssemblyPipeline.m_descriptorSetLayouts.data()));
+
+	m_surfaceAssemblyPipeline.Construct(this);
+}
+
+void Engine::InitializeStagingResources(uint8_t poolSize)
+{
+	ReleaseStagingResources();
+	VkDescriptorPoolCreateInfo descPoolCI = {};
+	descPoolCI.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	descPoolCI.maxSets = (uint32_t)poolSize * 3;
+	descPoolCI.flags = 0;
+	std::vector<VkDescriptorPoolSize> DPSizes(4);
+	DPSizes[0].descriptorCount = poolSize * 2;
+	DPSizes[0].type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+	DPSizes[1].descriptorCount = poolSize * 3;
+	DPSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+	DPSizes[2].descriptorCount = poolSize * 4;
+	DPSizes[2].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	DPSizes[3].descriptorCount = poolSize * 2;
+	DPSizes[3].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	descPoolCI.poolSizeCount = static_cast<uint32_t>(DPSizes.size());
+	descPoolCI.pPoolSizes = DPSizes.data();
+	vkCreateDescriptorPool(m_instance.device, &descPoolCI, nullptr, &m_stagingDescriptorPool);
+
+	m_stagingResources = new LFPoolQueue<ChunkStagingResources*>(poolSize);
+	for (int i = 0; i < m_stagingResources->size(); i++)
+	{
+		ChunkStagingResources* sRes = new ChunkStagingResources(this, 31,2);
+		sRes->AllocateDescriptors(this, 
+			m_stagingDescriptorPool, m_formDSetLayout,
+			m_surfaceAnalysisPipeline.m_descriptorSetLayouts[0],
+			m_surfaceAssemblyPipeline.m_descriptorSetLayouts[0]);
+		(*m_stagingResources)[i] = sRes;
+	}
+}
+
+void Engine::ReleaseStagingResources()
+{
+	if (m_stagingResources != nullptr) return;
+
+	std::vector<GPUResourceHandle*> resources(m_stagingResources->data(),
+		m_stagingResources->data() + m_stagingResources->size());
+	DestroyResources(resources);
+
+	vkDestroyDescriptorPool(m_instance.device, m_stagingDescriptorPool, nullptr);
+	SAFE_DEL(m_stagingResources);
+}
+
+void Engine::GarbageCollect(const GCForce force)
+{
+	if (force >= GC_FORCE_UNSAFE || m_dumpingFrame <= m_dumpFrame.load())
+	{
+		uint32_t retIndex = 0;
+		for (uint32_t i = 0;i < m_dumpingGarbage.size();i++)
+		{
+			GPUResourceHandle* res = m_dumpingGarbage[i];
+			if (force >= GC_FORCE_PINNED || !res->IsPinned())
+			{
+				res->Deallocate(this);
+				delete res;
+			}
+			else
+			{
+				m_dumpingGarbage[retIndex] = res;
+				retIndex++;
+			}
+		}
+		m_dumpingGarbage.resize(retIndex);
+		m_loadingGarbage.swap(m_dumpingGarbage);
+		m_dumpingFrame = m_loadingFrame.load();
+		if (force >= GC_FORCE_COMPLETE)
+		{
+			for (uint32_t i = 0; i < m_dumpingGarbage.size(); i++)
+			{
+				GPUResourceHandle* res = m_dumpingGarbage[i];
+				res->Deallocate(this);
+				delete res;
+			}
+			m_dumpingGarbage.clear();
+		}
+	}
+}
+
 #pragma region FUNCTION_EXPORTS
-EXPORT void SetRenderingShaders(Engine* instance, char* vs, int vsSize, char* fs, int fsSize)
+EXPORT void SetSurfaceShaders(Engine* instance, char* vs, int vsSize, char* fs, int fsSize)
 {
 	std::vector<char> vertex(vs, vs + vsSize);
 	std::vector<char> fragment(fs, fs + fsSize);
-	instance->SetChunkShaders(vertex, fragment);
-	//Engine::Get().SetChunkShaders(vertex, fragment);
+	instance->SetSurfaceShaders(vertex, fragment);
+}
+
+EXPORT void SetComputeShaders(Engine* instance, char* analysis, int analysisSize, char* assembly, int assemblySize)
+{
+	std::vector<char> surfaceAnalysis(analysis, analysis + analysisSize);
+	std::vector<char> surfaceAssembly(assembly, assembly + assemblySize);
+	instance->SetComputeShaders(surfaceAnalysis, surfaceAssembly);
+}
+
+EXPORT void InitializeVoxulkanInstance(Engine* instance)
+{
+	instance->InitializeResources();
+}
+
+EXPORT void InvokeGC(Engine* instance)
+{
+	instance->GarbageCollect();
 }
 
 static void UNITY_INTERFACE_API OnRenderEvent(int eventID, void* userData)
 {
-	//Engine::Get().Draw(static_cast<Camera*>(userData));
+	Camera* camera = static_cast<Camera*>(userData);
+	camera->m_instance->Draw(camera);
 }
 
 extern "C" UnityRenderingEventAndData UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API GetRenderInjection()

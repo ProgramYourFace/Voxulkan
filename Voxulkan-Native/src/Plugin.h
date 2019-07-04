@@ -2,9 +2,9 @@
 
 #include <string>
 
-#define SAFE_DELETE_ARR(s) if(s) delete[] s; s = nullptr
-#define SAFE_DELETE(s) if(s) delete s; s = nullptr
-#define SAFE_DELETE_RES(s) if(s){ s->Release(); delete s;} s = nullptr
+#define SAFE_DEL_ARR(s) if(s) delete[] s; s = nullptr
+#define SAFE_DEL(s) if(s) delete s; s = nullptr
+#define SAFE_DEL_DEALLOC(s, i) if(s){ s->Release(i); delete s;} s = nullptr
 #define EXPORT extern "C" __declspec(dllexport)
 
 void Log(const std::string& msg);

@@ -1,7 +1,0 @@
-﻿  SUCCESS: The process "Unity.exe" with PID 19888 has been terminated.
-  D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\shaders\shader.vert
-  to D:\Projects_Unity\_GitHub\Voxulkan\Assets\Shaders\Resources\NativeShaders\shader.vert.bytes
-  D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\shaders\shader.frag
-  to D:\Projects_Unity\_GitHub\Voxulkan\Assets\Shaders\Resources\NativeShaders\shader.frag.bytes
-  Plugin.cpp
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Plugin.cpp(2,10): error C1083:  Cannot open include file: 'IUnityInterface.h': No such file or directory

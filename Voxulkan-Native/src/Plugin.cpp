@@ -4,6 +4,7 @@
 #include "Engine.h"
 #include <ctime>
 #include <sstream>
+#include <algorithm>
 
 #pragma warning(disable : 4996)
 
@@ -54,7 +55,7 @@ EXPORT void CreateVoxulkanInstance(Engine*& instance)
 	instance = new Engine(s_Vulkan);
 	instance->RegisterComputeQueues(s_ComputeQueues, s_ComputeFamilyIndex);
 }
-EXPORT void DeleteVoxulkanInstance(Engine*& instance)
+EXPORT void DestroyVoxulkanInstance(Engine*& instance)
 {
 	instance->ReleaseResources();
 	delete instance;
@@ -68,6 +69,11 @@ static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType ev
 	case kUnityGfxDeviceEventInitialize:
 	{
 		LOG("GFX Device Event Initialized");
+		UnityVulkanPluginEventConfig eventConfig;
+		eventConfig.graphicsQueueAccess = kUnityVulkanGraphicsQueueAccess_DontCare;
+		eventConfig.renderPassPrecondition = kUnityVulkanRenderPass_EnsureInside;
+		eventConfig.flags = kUnityVulkanEventConfigFlag_EnsurePreviousFrameSubmission | kUnityVulkanEventConfigFlag_ModifiesCommandBuffersState;
+		s_Vulkan->ConfigureEvent(1, &eventConfig);
 		break;
 	}
 	case kUnityGfxDeviceEventShutdown:
@@ -85,21 +91,14 @@ extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginLoad(IUnit
 {
 	s_Graphics = unityInterfaces->Get<IUnityGraphics>();
 	s_Graphics->RegisterDeviceEventCallback(OnGraphicsDeviceEvent);
-
 	s_Vulkan = unityInterfaces->Get<IUnityGraphicsVulkan>();
 	s_Vulkan->InterceptInitialization(InterceptVulkanInitialization, nullptr);
-	UnityVulkanPluginEventConfig eventConfig;
-	eventConfig.graphicsQueueAccess = kUnityVulkanGraphicsQueueAccess_DontCare;
-	eventConfig.renderPassPrecondition = kUnityVulkanRenderPass_EnsureInside;
-	eventConfig.flags = kUnityVulkanEventConfigFlag_EnsurePreviousFrameSubmission | kUnityVulkanEventConfigFlag_ModifiesCommandBuffersState;
-	s_Vulkan->ConfigureEvent(1, &eventConfig);
 }
 
 // Unity plugin unload event
 extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginUnload()
 {
 	s_Graphics->UnregisterDeviceEventCallback(OnGraphicsDeviceEvent);
-	//Engine::Get().Deinitialize();
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL Hook_vkCreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDevice* pDevice)
@@ -209,7 +208,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_vkCreateDevice(VkPhysicalDevice physi
 	if (result != VK_SUCCESS)
 		LOG("Device creation failed!");
 
-	SAFE_DELETE_ARR(priorities);
+	SAFE_DEL_ARR(priorities);
 	
 	s_ComputeQueues = std::vector<VkQueue>(queueCount);
 	for (uint32_t i = 0; i < queueCount; i++)

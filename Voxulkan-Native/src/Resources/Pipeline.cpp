@@ -15,19 +15,14 @@ void Pipeline::GetVkPipeline(VkPipeline& pipeline, VkPipelineLayout& layout)
 	}
 }
 
-void Pipeline::Release(Engine* engine)
+void Pipeline::Release(Engine* instance)
 {
-	SAFE_RELEASE_HANDLE(m_gpuHandle);
+	SAFE_DESTROY(m_gpuHandle);
 }
 
-Pipeline::~Pipeline()
+void PipelineHandle::Deallocate(Engine* instance)
 {
-	Release();
-}
-
-void PipelineHandle::Dispose(VmaAllocator allocator)
-{
-	VkDevice dev = vmaGetAllocatorDevice(allocator);
+	VkDevice dev = instance->Device();
 	if (m_pipeline)
 		vkDestroyPipeline(dev, m_pipeline, nullptr);
 	if (m_layout)

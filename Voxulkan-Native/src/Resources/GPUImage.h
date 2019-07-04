@@ -1,27 +1,25 @@
 #pragma once
-#include "GResource.h"
+#include "GPUResource.h"
 
-class Engine;
-
-struct GImageHandle : GPUResourceHandle
+struct GPUImageHandle : GPUResourceHandle
 {
 	VkImage m_image = VK_NULL_HANDLE;
 	VkImageView m_view = VK_NULL_HANDLE;
 	VmaAllocation m_allocation = VK_NULL_HANDLE;
 
-	void Dispose(VmaAllocator allocator) override;
+	void Deallocate(Engine* instance) override;
 };
 
-class GImage : public GResource
+class GPUImage : public GPUResource
 {
 public:
 
 	inline VkImage GetImage() { return m_gpuHandle ? m_gpuHandle->m_image : nullptr; }
 
-	void Allocate(VmaAllocator allocator) override;
-	void Release() override;
+	void Allocate(Engine* instance) override;
+	void Release(Engine* instance) override;
 
-	GImageHandle* m_gpuHandle = nullptr;
+	GPUImageHandle* m_gpuHandle = nullptr;
 
 	//CreateInfo
 	VmaMemoryUsage m_memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY;

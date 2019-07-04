@@ -1,24 +1,26 @@
-#include "GImage.h"
+#include "GPUImage.h"
 #include "..//Plugin.h"
 #include "..//Engine.h"
 
-void GImageHandle::Dispose(VmaAllocator allocator)
+void GPUImageHandle::Deallocate(Engine* instance)
 {
 	if (m_view)
-	{
-		vkDestroyImageView(vmaGetAllocatorDevice(allocator), m_view, nullptr);
-	}
+		vkDestroyImageView(instance->Device(), m_view, nullptr);
 	if (m_image)
-		vmaDestroyImage(allocator, m_image, m_allocation);
+		vmaDestroyImage(instance->Allocator(), m_image, m_allocation);
 
 	m_image = nullptr;
 	m_allocation = nullptr;
 }
 
-void GImage::Allocate(VmaAllocator allocator)
+void GPUImage::Allocate(Engine* instance)
 {
-	Release();
-	m_gpuHandle = new GImageHandle();
+	if (m_gpuHandle)
+	{
+		LOG("GPU image allocation failed! Already allocated!");
+		return;
+	}
+	m_gpuHandle = new GPUImageHandle();
 
 	VkImageCreateInfo imageInfo = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
 	imageInfo.flags = 0;
@@ -36,7 +38,7 @@ void GImage::Allocate(VmaAllocator allocator)
 	VmaAllocationCreateInfo allocInfo = {};
 	allocInfo.usage = m_memoryUsage;
 
-	VK_CALL(vmaCreateImage(allocator, &imageInfo, &allocInfo, &m_gpuHandle->m_image, &m_gpuHandle->m_allocation, nullptr));
+	VK_CALL(vmaCreateImage(instance->Allocator(), &imageInfo, &allocInfo, &m_gpuHandle->m_image, &m_gpuHandle->m_allocation, nullptr));
 
 	VkImageViewCreateInfo viewInfo = {};
 	viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -49,11 +51,10 @@ void GImage::Allocate(VmaAllocator allocator)
 	viewInfo.subresourceRange.baseArrayLayer = 0;
 	viewInfo.subresourceRange.layerCount = 1;
 	
-	VkDevice device = vmaGetAllocatorDevice(allocator);
-	VK_CALL(vkCreateImageView(device, &viewInfo, nullptr, &m_gpuHandle->m_view));
+	VK_CALL(vkCreateImageView(instance->Device(), &viewInfo, nullptr, &m_gpuHandle->m_view));
 }
 
-void GImage::Release()
+void GPUImage::Release(Engine* instance)
 {
-	SAFE_RELEASE_HANDLE(m_gpuHandle);
+	SAFE_DESTROY(m_gpuHandle);
 }

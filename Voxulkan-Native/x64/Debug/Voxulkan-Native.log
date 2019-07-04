@@ -1,80 +1,17 @@
-﻿  D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Shaders\Surface.vert
-  to D:\Projects_Unity\_GitHub\Voxulkan\Assets\Shaders\Resources\NativeShaders\Surface.vert.bytes
-  D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Shaders\Surface.frag
-  to D:\Projects_Unity\_GitHub\Voxulkan\Assets\Shaders\Resources\NativeShaders\Surface.frag.bytes
-  D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Shaders\SphereVolume.comp
-  to D:\Projects_Unity\_GitHub\Voxulkan\Assets\Shaders\Resources\NativeShaders\SphereVolume.comp.bytes
+﻿  C:\Users\templ\Documents\GitHub\Voxulkan\Voxulkan-Native\src\Shaders\Surface.vert
+  to C:\Users\templ\Documents\GitHub\Voxulkan\Assets\Shaders\Resources\NativeShaders\Surface.vert.bytes
+  C:\Users\templ\Documents\GitHub\Voxulkan\Voxulkan-Native\src\Shaders\Surface.frag
+  to C:\Users\templ\Documents\GitHub\Voxulkan\Assets\Shaders\Resources\NativeShaders\Surface.frag.bytes
+  C:\Users\templ\Documents\GitHub\Voxulkan\Voxulkan-Native\src\Shaders\SphereVolume.comp
+  to C:\Users\templ\Documents\GitHub\Voxulkan\Assets\Shaders\Resources\NativeShaders\SphereVolume.comp.bytes
   VoxelBody.cpp
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,7): error C2039:  'atomic': is not a member of 'std'
-C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.21.27702\include\vector(19): message :  see declaration of 'std'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,13): error C2143:  syntax error: missing ';' before '<'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,13): error C4430:  missing type specifier - int assumed. Note: C++ does not support default-int
   VoxelChunk.cpp
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,68): error C2238:  unexpected token(s) preceding ';'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,7): error C2039:  'atomic': is not a member of 'std'
-C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.21.27702\include\vector(19): message :  see declaration of 'std'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,13): error C2143:  syntax error: missing ';' before '<'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,13): error C4430:  missing type specifier - int assumed. Note: C++ does not support default-int
   Engine.cpp
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,68): error C2238:  unexpected token(s) preceding ';'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,7): error C2039:  'atomic': is not a member of 'std'
-C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.21.27702\include\cmath(736): message :  see declaration of 'std'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,13): error C2143:  syntax error: missing ';' before '<'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,13): error C4430:  missing type specifier - int assumed. Note: C++ does not support default-int
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,68): error C2238:  unexpected token(s) preceding ';'
   Plugin.cpp
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Engine.cpp(25,30): warning C4267:  '=': conversion from 'size_t' to 'uint8_t', possible loss of data
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,7): error C2039:  'atomic': is not a member of 'std'
-C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.21.27702\include\cmath(736): message :  see declaration of 'std'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,13): error C2143:  syntax error: missing ';' before '<'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,13): error C4430:  missing type specifier - int assumed. Note: C++ does not support default-int
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,68): error C2238:  unexpected token(s) preceding ';'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Plugin.cpp(168,22): error C2039:  'min': is not a member of 'std'
-C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.21.27702\include\sstream(15): message :  see declaration of 'std'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Plugin.cpp(168,25): error C3861:  'min': identifier not found
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Plugin.cpp(188,21): error C2039:  'min': is not a member of 'std'
-C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.21.27702\include\sstream(15): message :  see declaration of 'std'
   ComputePipeline.cpp
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Plugin.cpp(188,24): error C3861:  'min': identifier not found
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,7): error C2039:  'atomic': is not a member of 'std'
-C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.21.27702\include\cmath(736): message :  see declaration of 'std'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,13): error C2143:  syntax error: missing ';' before '<'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,13): error C4430:  missing type specifier - int assumed. Note: C++ does not support default-int
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,68): error C2238:  unexpected token(s) preceding ';'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Resources\ComputePipeline.cpp(59,2): error C2039:  'Get': is not a member of 'Engine'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Engine.h(13): message :  see declaration of 'Engine'
-  GBuffer.cpp
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Resources\ComputePipeline.cpp(59,2): error C3861:  'Get': identifier not found
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,7): error C2039:  'atomic': is not a member of 'std'
-C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.21.27702\include\cmath(736): message :  see declaration of 'std'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,13): error C2143:  syntax error: missing ';' before '<'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,13): error C4430:  missing type specifier - int assumed. Note: C++ does not support default-int
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,68): error C2238:  unexpected token(s) preceding ';'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Resources\GBuffer.cpp(32,2): error C2039:  'Get': is not a member of 'Engine'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Engine.h(13): message :  see declaration of 'Engine'
-  GImage.cpp
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Resources\GBuffer.cpp(32,2): error C3861:  'Get': identifier not found
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,7): error C2039:  'atomic': is not a member of 'std'
-C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.21.27702\include\cmath(736): message :  see declaration of 'std'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,13): error C2143:  syntax error: missing ';' before '<'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,13): error C4430:  missing type specifier - int assumed. Note: C++ does not support default-int
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,68): error C2238:  unexpected token(s) preceding ';'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Resources\GImage.cpp(58,2): error C2039:  'Get': is not a member of 'Engine'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Engine.h(13): message :  see declaration of 'Engine'
+  GPUBuffer.cpp
+  GPUImage.cpp
   Pipeline.cpp
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Resources\GImage.cpp(58,2): error C3861:  'Get': identifier not found
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,7): error C2039:  'atomic': is not a member of 'std'
-C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.21.27702\include\cmath(736): message :  see declaration of 'std'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,13): error C2143:  syntax error: missing ';' before '<'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,13): error C4430:  missing type specifier - int assumed. Note: C++ does not support default-int
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,68): error C2238:  unexpected token(s) preceding ';'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Resources\Pipeline.cpp(20,2): error C2039:  'Get': is not a member of 'Engine'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Engine.h(13): message :  see declaration of 'Engine'
   RenderPipeline.cpp
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Resources\Pipeline.cpp(20,2): error C3861:  'Get': identifier not found
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,7): error C2039:  'atomic': is not a member of 'std'
-C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\VC\Tools\MSVC\14.21.27702\include\cmath(736): message :  see declaration of 'std'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,13): error C2143:  syntax error: missing ';' before '<'
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,13): error C4430:  missing type specifier - int assumed. Note: C++ does not support default-int
   Generating Code...
-D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Components\VoxelChunk.h(40,68): error C2238:  unexpected token(s) preceding ';'
+C:\Users\templ\Documents\GitHub\Voxulkan\Voxulkan-Native\src\Engine.cpp(502,3): error C2059:  syntax error: '('

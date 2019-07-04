@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.Rendering;
+using Unity.Entities;
 
 namespace Voxulkan
 {
@@ -17,9 +18,8 @@ namespace Voxulkan
 
         [DllImport(Native.DLL)]
         public static extern IntPtr GetRenderInjection();
-
         [DllImport(Native.DLL)]
-        public static extern IntPtr CreateNativeCamera();
+        public static extern IntPtr CreateNativeCamera(IntPtr instance);
         [DllImport(Native.DLL)]
         public static extern void DestroyNativeCamera(IntPtr camera);
         [DllImport(Native.DLL)]
@@ -31,7 +31,7 @@ namespace Voxulkan
             camera.allowMSAA = false;
             commandBuffer = new CommandBuffer();
             commandBuffer.name = "NativeSceneInjection";
-            nativeCamera = CreateNativeCamera();
+            nativeCamera = CreateNativeCamera(NativeSystem.Active.NativeInstance);
             commandBuffer.IssuePluginEventAndData(GetRenderInjection(), 1, nativeCamera);
         }
 

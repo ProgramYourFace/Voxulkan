@@ -25,26 +25,28 @@
     <ClCompile Include="src\Engine.cpp" />
     <ClCompile Include="src\Plugin.cpp" />
     <ClCompile Include="src\Resources\ComputePipeline.cpp" />
-    <ClCompile Include="src\Resources\GBuffer.cpp" />
-    <ClCompile Include="src\Resources\GImage.cpp" />
+    <ClCompile Include="src\Resources\GPUBuffer.cpp" />
+    <ClCompile Include="src\Resources\GPUImage.cpp" />
     <ClCompile Include="src\Resources\Pipeline.cpp" />
     <ClCompile Include="src\Resources\RenderPipeline.cpp" />
-    <ClCompile Include="src\Resources\GResource.cpp" />
+    <ClCompile Include="src\Resources\GPUResource.cpp" />
     <ClCompile Include="src\VMA.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\Camera.h" />
     <ClInclude Include="src\Components\VoxelBody.h" />
     <ClInclude Include="src\Components\VoxelChunk.h" />
+    <ClInclude Include="src\Containers\LFPoolQueue.h" />
+    <ClInclude Include="src\Containers\MutexList.h" />
     <ClInclude Include="src\Containers\MutexQueue.h" />
     <ClInclude Include="src\Engine.h" />
     <ClInclude Include="src\Plugin.h" />
     <ClInclude Include="src\Resources\ComputePipeline.h" />
-    <ClInclude Include="src\Resources\GBuffer.h" />
-    <ClInclude Include="src\Resources\GImage.h" />
+    <ClInclude Include="src\Resources\GPUBuffer.h" />
+    <ClInclude Include="src\Resources\GPUImage.h" />
     <ClInclude Include="src\Resources\Pipeline.h" />
     <ClInclude Include="src\Resources\RenderPipeline.h" />
-    <ClInclude Include="src\Resources\GResource.h" />
+    <ClInclude Include="src\Resources\GPUResource.h" />
     <ClInclude Include="src\VMA.h" />
   </ItemGroup>
   <ItemGroup>
