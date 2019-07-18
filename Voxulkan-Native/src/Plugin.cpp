@@ -46,7 +46,6 @@ static PFN_vkGetInstanceProcAddr UNITY_INTERFACE_API InterceptVulkanInitializati
 static IUnityGraphics* s_Graphics = NULL;
 static IUnityGraphicsVulkan* s_Vulkan = NULL;
 static Engine* s_Engine;
-
 static uint32_t s_ComputeFamilyIndex;
 static std::vector<VkQueue> s_ComputeQueues;
 

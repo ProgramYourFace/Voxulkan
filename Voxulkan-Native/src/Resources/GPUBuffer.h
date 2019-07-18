@@ -16,6 +16,8 @@ public:
 
 	void Allocate(Engine* instance) override;
 	void Release(Engine* instance) override;
+	inline VkBuffer GetVk() { return m_gpuHandle ? m_gpuHandle->m_buffer : nullptr; }
+	inline void Dereference() { m_gpuHandle = nullptr; }
 
 	GPUBufferHandle* m_gpuHandle = nullptr;
 

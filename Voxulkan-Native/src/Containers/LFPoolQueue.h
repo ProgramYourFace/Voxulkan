@@ -1,10 +1,14 @@
 #pragma once
 #include <atomic>
 
+#ifdef  END
+#undef END
+#endif
+#define END 0xffff
+
 template <typename T>
 class LFPoolQueue {
 public:
-	const uint16_t END = 0xffff;
 
 	LFPoolQueue(uint16_t size)
 	{
@@ -24,7 +28,7 @@ public:
 		delete[] m_ptrs;
 	}
 
-	int dequeue()
+	uint16_t dequeue()
 	{
 		bool wasMaxed = false;
 		struct VersionRef

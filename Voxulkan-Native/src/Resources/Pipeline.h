@@ -10,12 +10,12 @@ struct PipelineHandle : public GPUResourceHandle
 	void Deallocate(Engine* instance) override;
 };
 
-class Pipeline
+class Pipeline : GPUResource
 {
 public:
 	void GetVkPipeline(VkPipeline& pipeline, VkPipelineLayout& layout);
-	virtual void Construct(Engine* instance) {};
-	virtual void Release(Engine* instance);
+	void Allocate(Engine* instance) override = 0;
+	void Release(Engine* instance) override;
 protected:
 	PipelineHandle* m_gpuHandle = nullptr;
 };

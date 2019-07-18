@@ -5,7 +5,7 @@
 class ComputePipeline : public Pipeline
 {
 public:
-	void Construct(Engine* instance) override;
+	void Allocate(Engine* instance) override;
 	void Release(Engine* instance) override;
 
 	//Layout info

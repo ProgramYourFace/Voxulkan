@@ -2,7 +2,7 @@
 #include "..//Plugin.h"
 #include "..//Engine.h"
 
-void ComputePipeline::Construct(Engine* instance)
+void ComputePipeline::Allocate(Engine* instance)
 {
 	if (m_gpuHandle)
 	{

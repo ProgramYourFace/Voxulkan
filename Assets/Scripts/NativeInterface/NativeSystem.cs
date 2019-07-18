@@ -20,6 +20,7 @@ namespace Voxulkan
             }
         }
 
+        IntPtr m_sphereForm;
         IntPtr m_nativeInstance;
         protected override void OnCreate()
         {
@@ -27,11 +28,19 @@ namespace Voxulkan
             byte[] vertexShader = Native.LoadShaderBytes("Surface.vert");
             byte[] fragmentShader = Native.LoadShaderBytes("Surface.frag");
             Native.SetSurfaceShaders(m_nativeInstance, vertexShader, vertexShader.Length, fragmentShader, fragmentShader.Length);
+            byte[] surfaceAnalysis = Native.LoadShaderBytes("SurfaceAnalysis.comp");
+            byte[] surfaceAssembly = Native.LoadShaderBytes("SurfaceAssembly.comp");
+            Native.SetComputeShaders(m_nativeInstance, surfaceAnalysis, surfaceAnalysis.Length, surfaceAssembly, surfaceAssembly.Length);
             Native.InitializeVoxulkanInstance(m_nativeInstance);
+
+            byte[] sphereFormShader = Native.LoadShaderBytes("SphereForm.comp");
+            m_sphereForm = Native.CreateFormPipeline(m_nativeInstance, sphereFormShader, sphereFormShader.Length);
+            Native.ComputeTest(m_nativeInstance, m_sphereForm);
         }
 
         protected override void OnDestroy()
         {
+            Native.Release(m_nativeInstance, ref m_sphereForm);
             Native.DestroyVoxulkanInstance(ref m_nativeInstance);
         }
 

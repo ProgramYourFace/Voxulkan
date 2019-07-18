@@ -30,9 +30,8 @@ namespace Voxulkan
             byte[] fragmentShader, int fsSize);
         [DllImport(DLL)]
         public static extern void SetComputeShaders(IntPtr instance,
-            byte[] surfaceAnalysis, int saSize,
-            byte[] vertexAssembly, int vaSize,
-            byte[] triangleAssembly, int taSize);
+            byte[] surfaceAnalysis, int analysisSize,
+            byte[] surfaceAssembly, int assemblySize);
         [DllImport(DLL)]
         public static extern void CreateVoxulkanInstance(ref IntPtr instance);
         [DllImport(DLL)]
@@ -41,16 +40,24 @@ namespace Voxulkan
         public static extern void InitializeVoxulkanInstance(IntPtr instance);
         [DllImport(DLL)]
         public static extern void InvokeGC(IntPtr instance);
+
+
+        [DllImport(DLL)]
+        public static extern void ComputeTest(IntPtr instance, IntPtr compute);
+        [DllImport(DLL)]
+        public static extern IntPtr CreateFormPipeline(IntPtr instance,
+            byte[] formShader, int shaderSize);
+        [DllImport(DLL)]
+        public static extern void Release(IntPtr instance, ref IntPtr resource);
+
         public static byte[] LoadShaderBytes(string shaderName)
         {
             return Resources.Load<TextAsset>("NativeShaders/" + shaderName).bytes;
         }
-
         public static Matrix4x4 GetNativeViewProjection(this Camera camera)
         {
             return GL.GetGPUProjectionMatrix(camera.projectionMatrix, false) * camera.worldToCameraMatrix;
         }
-
         public static void NativeLogger(string msg)
         {
             Debug.Log("<color=#0000ff>[" + DLL + "]: " + msg + "</color>");

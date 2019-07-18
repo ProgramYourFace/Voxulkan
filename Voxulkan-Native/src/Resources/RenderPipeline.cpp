@@ -2,7 +2,7 @@
 #include "..//Plugin.h"
 #include "..//Engine.h"
 
-void RenderPipeline::ConstructOnRenderPass(Engine* instance, VkRenderPass renderPass)
+void RenderPipeline::AllocateOnRenderPass(Engine* instance, VkRenderPass renderPass)
 {
 	if (instance && renderPass)
 	{
@@ -10,12 +10,12 @@ void RenderPipeline::ConstructOnRenderPass(Engine* instance, VkRenderPass render
 		{
 			Release(instance);
 			m_registeredPass = renderPass;
-			Construct(instance);
+			Allocate(instance);
 		}
 	}
 }
 
-void RenderPipeline::Construct(Engine* instance)
+void RenderPipeline::Allocate(Engine* instance)
 {
 
 	if (!m_registeredPass || !instance)
@@ -74,7 +74,7 @@ void RenderPipeline::Construct(Engine* instance)
 		rasterizationState.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
 		rasterizationState.polygonMode = m_wireframe ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
 		rasterizationState.cullMode = m_cullMode;
-		rasterizationState.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+		rasterizationState.frontFace = VK_FRONT_FACE_CLOCKWISE;
 		rasterizationState.depthClampEnable = VK_FALSE;
 		rasterizationState.rasterizerDiscardEnable = VK_FALSE;
 		rasterizationState.depthBiasEnable = VK_FALSE;

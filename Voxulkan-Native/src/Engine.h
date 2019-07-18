@@ -14,6 +14,21 @@
 
 class VoxelBody;
 
+typedef struct QueueResource
+{
+	VkQueue m_queue = VK_NULL_HANDLE;
+	uint8_t m_workerStart = 0xFF;
+	uint8_t m_workerEnd = 0xFF;
+
+	VkCommandBuffer m_CMDB = VK_NULL_HANDLE;
+} QueueResource;
+
+typedef struct WorkerResource
+{
+	VkCommandBuffer m_CMDB = VK_NULL_HANDLE;
+	uint8_t m_queueIndex = 0xFF;
+} WorkerResource;
+
 class Engine
 {
 public:
@@ -27,6 +42,9 @@ public:
 	void SetComputeShaders(const std::vector<char>& surfaceAnalysis, const std::vector<char>& surfaceAssembly);
 
 	void Draw(Camera* camera);
+	ComputePipeline* CreateFormPipeline(const std::vector<char>& shader);
+
+	void ComputeTest(ComputePipeline* form);
 
 	void DestroyResource(GPUResourceHandle* resource);
 	void DestroyResources(const std::vector<GPUResourceHandle*>& resources);
@@ -44,10 +62,10 @@ public:
 
 	static uint8_t GetWorkerCount();
 private:
-
 	void InitializeRenderPipeline();
 	void InitializeComputePipelines();
 	void InitializeStagingResources(uint8_t poolSize);
+
 	void ReleaseStagingResources();
 
 	IUnityGraphicsVulkan* m_unityVulkan = nullptr;
@@ -59,27 +77,16 @@ private:
 	VkDescriptorSetLayout m_formDSetLayout;
 	ComputePipeline m_surfaceAnalysisPipeline = {};
 	ComputePipeline m_surfaceAssemblyPipeline = {};
-	VoxelBody* m_testVB = nullptr;
+	
+	std::mutex m_testMutex = {};
+	GPUBuffer m_indexBuffer = {};
+	GPUBuffer m_vertexBuffer = {};
+	uint32_t m_vertexCount = 0;
+	uint32_t m_indexCount = 0;
 
-	typedef struct WorkerResource
-	{
-		VkCommandBuffer m_CMDB = VK_NULL_HANDLE;
-		std::vector<ChunkStagingResources> m_stagingQueue = {};
-		uint32_t m_submittedQueueRange = 0;
-		uint8_t m_queueIndex = 0xFF;
-	} WorkerResource;
 	WorkerResource* m_workers;
 	uint8_t m_workerCount;
 
-	typedef struct QueueResource
-	{
-		VkQueue m_queue = VK_NULL_HANDLE;
-		uint8_t m_workerStart = 0xFF;
-		uint8_t m_workerEnd = 0xFF;
-
-		VkCommandBuffer m_CMDB = VK_NULL_HANDLE;
-		GPUImage m_indexMap = {};
-	} QueueResource;
 	QueueResource* m_queues;
 	uint8_t m_queueCount;
 

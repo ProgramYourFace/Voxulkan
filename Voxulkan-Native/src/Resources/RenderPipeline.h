@@ -5,8 +5,8 @@
 class RenderPipeline : public Pipeline
 {
 public:
-	void ConstructOnRenderPass(Engine* instance, VkRenderPass renderPass);
-	void Construct(Engine* instance) override;
+	void AllocateOnRenderPass(Engine* instance, VkRenderPass renderPass);
+	void Allocate(Engine* instance) override;
 
 	//Layout info
 	std::vector<VkPushConstantRange> m_pushConstants;

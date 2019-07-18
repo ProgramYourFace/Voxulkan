@@ -23,12 +23,15 @@ struct VoxelChunk
 	uint8_t m_subdivisionCount = 0;
 	VoxelChunk* m_subChunks = nullptr;
 
-	GPUImage m_volumeImage;
-	GPUBuffer m_triangleBuffer;
+	GPUImage m_densityImage;
+	GPUBuffer m_indexBuffer;
 	GPUBuffer m_vertexBuffer;
-	GPUBuffer m_argsBuffer;
+	uint32_t m_vertexCount;
+	uint32_t m_indexCount;
 
-	void AllocateVolume(Engine* instance, const glm::uvec3& size, uint8_t padding);
+	void SetMeshData(const GPUBuffer& vertexBuffer, const GPUBuffer& indexBuffer, uint32_t vertexCount, uint32_t indexCount);
+	void ReleaseMesh(Engine* instance);
+	void AllocateVolume(Engine* instance, const glm::uvec3& size);
 	void ApplyForm(VkCommandBuffer commandBuffer,
 		ComputePipeline* computePipeline,
 		VkDescriptorSet resources,
@@ -54,6 +57,12 @@ struct SurfaceAttributes
 	uint32_t indexCount;
 };
 
+struct SurfacePipelineConstants
+{
+	glm::uvec3 base;
+	alignas(16)glm::uvec3 range;
+};
+
 struct ChunkStagingResources : public GPUResourceHandle
 {
 	ChunkStagingResources(Engine* instance, uint8_t size, uint8_t padding);
@@ -75,10 +84,11 @@ struct ChunkStagingResources : public GPUResourceHandle
 	GPUBuffer m_verticies = {};
 	GPUBuffer m_indicies = {};
 
-	void AllocateDescriptors(Engine* instance,
-		VkDescriptorPool descriptorPool,
-		VkDescriptorSetLayout formDSetLayout,
-		VkDescriptorSetLayout analysisDSetLayout,
-		VkDescriptorSetLayout assemblyDSetLayout);
+	void WriteDescriptors(Engine* instance,
+		VkDescriptorSet formDSet,
+		VkDescriptorSet analysisDSet,
+		VkDescriptorSet assemblyDSet);
+
+	void GetImageTransferBarriers(VkImageMemoryBarrier& colorBarrier, VkImageMemoryBarrier& indexBarrier);
 	void Deallocate(Engine* instance) override;
 };

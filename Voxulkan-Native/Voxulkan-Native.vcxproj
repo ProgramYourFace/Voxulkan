@@ -52,7 +52,9 @@
   <ItemGroup>
     <None Include="src\Shaders\Surface.frag" />
     <None Include="src\Shaders\Surface.vert" />
-    <None Include="src\Shaders\SphereVolume.comp" />
+    <None Include="src\Shaders\SphereForm.comp" />
+    <None Include="src\Shaders\SurfaceAnalysis.comp" />
+    <None Include="src\Shaders\SurfaceAssembly.comp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
