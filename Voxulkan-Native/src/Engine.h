@@ -4,7 +4,7 @@
 #include "Resources/RenderPipeline.h"
 #include "Resources/ComputePipeline.h"
 #include "Resources/GPUBuffer.h"
-#include "Components/VoxelChunk.h"
+#include "Components/VoxelBody.h"
 #include "Containers/MutexList.h"
 #include "Containers/LFPoolQueue.h"
 #include "Camera.h"
@@ -19,13 +19,13 @@ typedef struct QueueResource
 	VkQueue m_queue = VK_NULL_HANDLE;
 	uint8_t m_workerStart = 0xFF;
 	uint8_t m_workerEnd = 0xFF;
-
-	VkCommandBuffer m_CMDB = VK_NULL_HANDLE;
 } QueueResource;
 
 typedef struct WorkerResource
 {
+	bool m_recordingCmds = false;
 	VkCommandBuffer m_CMDB = VK_NULL_HANDLE;
+	std::vector<BodyRenderPackage> m_render;
 	uint8_t m_queueIndex = 0xFF;
 } WorkerResource;
 
@@ -33,18 +33,27 @@ class Engine
 {
 public:
 	friend class VoxelBody;
+	friend struct VoxelChunk;
 	Engine(IUnityGraphicsVulkan* unityVulkan);
 	void InitializeResources();
 	void ReleaseResources();
 
 	void RegisterComputeQueues(std::vector<VkQueue> queues, const uint32_t& queueFamily);
-	void SetSurfaceShaders(const std::vector<char>& vertex, const std::vector<char>& fragment);
+	void SetSurfaceShaders(std::vector<char>& vertex, std::vector<char>& tessCtrl, std::vector<char>& tessEval, std::vector<char>& fragment);
 	void SetComputeShaders(const std::vector<char>& surfaceAnalysis, const std::vector<char>& surfaceAssembly);
+	void SetMaterialResources(void* attributesBuffer, uint32_t attribsByteCount,
+		void* colorSpecData, uint32_t csWidth, uint32_t csHeight,
+		void* nrmHeightData, uint32_t nhWidth, uint32_t nhHeight,
+		uint32_t materialCount);
 
+	inline uint8_t GetQueueCount() { return m_queueCount; };
+
+	void SubmitRender();
+	void SubmitQueue(uint8_t queueIndex);
 	void Draw(Camera* camera);
 	ComputePipeline* CreateFormPipeline(const std::vector<char>& shader);
 
-	void ComputeTest(ComputePipeline* form);
+	//void ComputeTest(ComputePipeline* form);
 
 	void DestroyResource(GPUResourceHandle* resource);
 	void DestroyResources(const std::vector<GPUResourceHandle*>& resources);
@@ -60,12 +69,16 @@ public:
 	inline const VkDevice& Device() { return m_instance.device; }
 	inline const VmaAllocator& Allocator() { return m_allocator; }
 
+	static const uint8_t CHUNK_SIZE = 31;
+	static const uint8_t CHUNK_PADDING = 2;
 	static uint8_t GetWorkerCount();
 private:
 	void InitializeRenderPipeline();
 	void InitializeComputePipelines();
 	void InitializeStagingResources(uint8_t poolSize);
 
+	void ReleaseRenderPipelines();
+	void ReleaseComputePipelines();
 	void ReleaseStagingResources();
 
 	IUnityGraphicsVulkan* m_unityVulkan = nullptr;
@@ -74,27 +87,34 @@ private:
 
 	//Testing
 	RenderPipeline m_renderPipeline = {};
-	VkDescriptorSetLayout m_formDSetLayout;
+	VkDescriptorSet m_renderDSet = nullptr;
+	VkDescriptorSetLayout m_formDSetLayout = nullptr;
 	ComputePipeline m_surfaceAnalysisPipeline = {};
 	ComputePipeline m_surfaceAssemblyPipeline = {};
-	
+	GPUBuffer m_surfaceAttributesBuffer = {};
+	GPUImage m_surfaceColorSpecTex = {};
+	GPUImage m_surfaceNrmHeightTex = {};
+	/*
 	std::mutex m_testMutex = {};
 	GPUBuffer m_indexBuffer = {};
 	GPUBuffer m_vertexBuffer = {};
 	uint32_t m_vertexCount = 0;
-	uint32_t m_indexCount = 0;
+	uint32_t m_indexCount = 0;*/
 
-	WorkerResource* m_workers;
-	uint8_t m_workerCount;
+	std::mutex m_renderLock;
+	std::vector<BodyRenderPackage> m_render;
 
-	QueueResource* m_queues;
-	uint8_t m_queueCount;
+	WorkerResource* m_workers = nullptr;
+	uint8_t m_workerCount = 0;
 
-	VkCommandPool m_computeCmdPool;
+	QueueResource* m_queues = nullptr;
+	uint8_t m_queueCount = 0;
+
+	VkCommandPool m_computeCmdPool = nullptr;
 	uint32_t m_computeQueueFamily = 0;
 
 	LFPoolQueue<ChunkStagingResources*>* m_stagingResources = nullptr;
-	VkDescriptorPool m_stagingDescriptorPool;
+	VkDescriptorPool m_stagingDescriptorPool = nullptr;
 
 #define SAFE_DUMP_MARGIN 10
 	typedef unsigned long long FrameNumber;

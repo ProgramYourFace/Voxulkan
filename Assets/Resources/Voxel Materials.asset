@@ -1,0 +1,45 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dd160d9e9a9e2f94cbf429c5812e99b8, type: 3}
+  m_Name: Voxel Materials
+  m_EditorClassIdentifier: 
+  m_colorSpecRes: {x: 1024, y: 1024}
+  m_nrmHeightRes: {x: 1024, y: 1024}
+  m_materials:
+  - name: Cliff Rock
+    map: {fileID: 4900000, guid: 7bfe10a343778b24aaaae4be763a9498, type: 3}
+    attributes:
+      tint: {r: 0.6509434, g: 0.6509434, b: 0.6509434, a: 1}
+      size: {x: 5, y: 5}
+      tessHeight: 1
+      tessCenter: 0.5
+  - name: Cobble Stone
+    map: {fileID: 4900000, guid: 19a46f33671a2354fb06ab22520b9222, type: 3}
+    attributes:
+      tint: {r: 1, g: 0.1428833, b: 0, a: 1}
+      size: {x: 3, y: 3}
+      tessHeight: 0.5
+      tessCenter: 0.2
+  - name: Rubble
+    map: {fileID: 4900000, guid: ea859d4dfeec62b46af1e7e379ca00c6, type: 3}
+    attributes:
+      tint: {r: 0.44099998, g: 0.37977448, b: 0.336042, a: 1}
+      size: {x: 5, y: 5}
+      tessHeight: 0.5
+      tessCenter: 0.1
+  - name: River Stone
+    map: {fileID: 4900000, guid: ace0dd3a98c04e74c922915c2575e14b, type: 3}
+    attributes:
+      tint: {r: 1, g: 0.1428833, b: 0, a: 1}
+      size: {x: 5, y: 5}
+      tessHeight: 0.4
+      tessCenter: 0.2

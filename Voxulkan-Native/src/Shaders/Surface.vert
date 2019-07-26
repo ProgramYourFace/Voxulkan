@@ -1,14 +1,14 @@
-#version 310 es
-layout(location = 0) in vec3 vpos;
-layout(location = 1) in vec3 vnrm;
-layout(location = 2) in uint vid;
+#version 430
+layout(location = 0) in vec3 vPos;
+layout(location = 1) in vec3 vNrm;
+layout(location = 2) in uint vId;
 
-layout(location = 0) out highp vec4 color;
-layout(location = 1) out highp vec3 normal;
-layout(push_constant) uniform PushConstants { mat4 matrix; };
+layout(location = 0) out vec3 cNrm;
+layout(location = 1) out uint cId;
 
-void main() {
-    gl_Position = matrix * vec4(vpos.rgb, 1.0);
-	normal = normalize(vnrm * 2.0 - 1.0);
-    color = vec4(abs(normal),1.0);
+void main()
+{
+	gl_Position = vec4(vPos.rgb, 1.0);
+	cNrm = normalize(vNrm * 2.0 - 1.0);
+	cId = vId;
 }

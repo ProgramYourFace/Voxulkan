@@ -115,5 +115,11 @@
     <None Include="src\Shaders\SphereForm.comp">
       <Filter>Resource Files</Filter>
     </None>
+    <None Include="src\Shaders\Surface.tesc">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="src\Shaders\Surface.tese">
+      <Filter>Resource Files</Filter>
+    </None>
   </ItemGroup>
 </Project>

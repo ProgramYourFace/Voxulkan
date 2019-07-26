@@ -20,27 +20,37 @@ namespace Voxulkan
             }
         }
 
-        IntPtr m_sphereForm;
+        VoxelSystem m_voxelSystem;
         IntPtr m_nativeInstance;
+        byte m_queueCount;
         protected override void OnCreate()
         {
             Native.CreateVoxulkanInstance(ref m_nativeInstance);
             byte[] vertexShader = Native.LoadShaderBytes("Surface.vert");
+            byte[] tessCtrlShader = Native.LoadShaderBytes("Surface.tesc");
+            byte[] tessEvalShader = Native.LoadShaderBytes("Surface.tese");
             byte[] fragmentShader = Native.LoadShaderBytes("Surface.frag");
-            Native.SetSurfaceShaders(m_nativeInstance, vertexShader, vertexShader.Length, fragmentShader, fragmentShader.Length);
+            Native.SetSurfaceShaders(m_nativeInstance, 
+                vertexShader, vertexShader.Length,
+                tessCtrlShader, tessCtrlShader.Length,
+                tessEvalShader, tessEvalShader.Length,
+                fragmentShader, fragmentShader.Length);
             byte[] surfaceAnalysis = Native.LoadShaderBytes("SurfaceAnalysis.comp");
             byte[] surfaceAssembly = Native.LoadShaderBytes("SurfaceAssembly.comp");
             Native.SetComputeShaders(m_nativeInstance, surfaceAnalysis, surfaceAnalysis.Length, surfaceAssembly, surfaceAssembly.Length);
-            Native.InitializeVoxulkanInstance(m_nativeInstance);
 
-            byte[] sphereFormShader = Native.LoadShaderBytes("SphereForm.comp");
-            m_sphereForm = Native.CreateFormPipeline(m_nativeInstance, sphereFormShader, sphereFormShader.Length);
-            Native.ComputeTest(m_nativeInstance, m_sphereForm);
+            Resources.Load<VoxelMaterialDatabase>("Voxel Materials").SetInstanceResources(m_nativeInstance);
+
+            Native.InitializeVoxulkanInstance(m_nativeInstance);
+            m_queueCount = Native.GetQueueCount(m_nativeInstance);
+
+            m_voxelSystem = World.GetOrCreateSystem<VoxelSystem>();
+            m_voxelSystem.OnNativeInitialized(this);
         }
 
         protected override void OnDestroy()
         {
-            Native.Release(m_nativeInstance, ref m_sphereForm);
+            m_voxelSystem.OnNativeDeinitialized();
             Native.DestroyVoxulkanInstance(ref m_nativeInstance);
         }
 
@@ -54,6 +64,7 @@ namespace Voxulkan
         }
 
         public IntPtr NativeInstance { get { return m_nativeInstance; } }
+        public byte QueueCount { get { return m_queueCount; } }
         public static NativeSystem Active { get { return World.Active.GetExistingSystem<NativeSystem>(); } }
     }
 }

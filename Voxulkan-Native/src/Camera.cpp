@@ -11,11 +11,12 @@ EXPORT void DestroyNativeCamera(Camera* camera)
 	delete camera;
 }
 
-EXPORT void SetCameraVP(Camera* camera, glm::mat4x4 VP)
+EXPORT void SetCameraVP(Camera* camera, CameraConstants constants)
 {
-	camera->m_VP_Matrix.store(VP, std::memory_order_relaxed);
+	const_cast<CameraConstants&>(camera->m_constants) = constants;
 }
 
 Camera::Camera(Engine* instance) : m_instance(instance)
 {
+
 }

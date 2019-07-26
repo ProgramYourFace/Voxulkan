@@ -25,8 +25,8 @@ void RenderPipeline::Allocate(Engine* instance)
 	pipelineLayoutCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 	pipelineLayoutCreateInfo.pPushConstantRanges = m_pushConstants.data();
 	pipelineLayoutCreateInfo.pushConstantRangeCount = static_cast<uint32_t>(m_pushConstants.size());
-	pipelineLayoutCreateInfo.pSetLayouts = nullptr;
-	pipelineLayoutCreateInfo.setLayoutCount = 0;
+	pipelineLayoutCreateInfo.pSetLayouts = m_descriptorSetLayouts.data();
+	pipelineLayoutCreateInfo.setLayoutCount = static_cast<uint32_t>(m_descriptorSetLayouts.size());
 
 	m_gpuHandle = new PipelineHandle();
 	VkDevice device = instance->Device();
@@ -34,7 +34,7 @@ void RenderPipeline::Allocate(Engine* instance)
 
 	VkGraphicsPipelineCreateInfo pipelineCreateInfo = {};
 
-	VkPipelineShaderStageCreateInfo shaderStages[2] = {};
+	std::vector<VkPipelineShaderStageCreateInfo> shaderStages(2);
 	shaderStages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 	shaderStages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
 	shaderStages[0].pName = "main";
@@ -60,6 +60,33 @@ void RenderPipeline::Allocate(Engine* instance)
 		success = vkCreateShaderModule(device, &moduleCreateInfo, NULL, &shaderStages[1].module) == VK_SUCCESS;
 	}
 
+	bool hasTess = m_tessCtrlShader.size() > 0 && m_tessEvalShader.size() > 0;
+	if (hasTess)
+	{
+		shaderStages.reserve(2);
+		shaderStages.push_back(shaderStages[0]);
+		shaderStages.push_back(shaderStages[0]);
+		shaderStages[2].stage = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+		shaderStages[3].stage = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+		if (success)
+		{
+			VkShaderModuleCreateInfo moduleCreateInfo = {};
+			moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+			moduleCreateInfo.codeSize = static_cast<uint32_t>(m_tessCtrlShader.size());
+			moduleCreateInfo.pCode = reinterpret_cast<const uint32_t*>(m_tessCtrlShader.data());
+			success = vkCreateShaderModule(device, &moduleCreateInfo, NULL, &shaderStages[2].module) == VK_SUCCESS;
+		}
+
+		if (success)
+		{
+			VkShaderModuleCreateInfo moduleCreateInfo = {};
+			moduleCreateInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+			moduleCreateInfo.codeSize = static_cast<uint32_t>(m_tessEvalShader.size());
+			moduleCreateInfo.pCode = reinterpret_cast<const uint32_t*>(m_tessEvalShader.data());
+			success = vkCreateShaderModule(device, &moduleCreateInfo, NULL, &shaderStages[3].module) == VK_SUCCESS;
+		}
+	}
+
 	if (success)
 	{
 		pipelineCreateInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -68,7 +95,11 @@ void RenderPipeline::Allocate(Engine* instance)
 
 		VkPipelineInputAssemblyStateCreateInfo inputAssemblyState = {};
 		inputAssemblyState.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-		inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+		inputAssemblyState.topology = hasTess ? VK_PRIMITIVE_TOPOLOGY_PATCH_LIST : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+		VkPipelineTessellationStateCreateInfo tessellationState = {};
+		tessellationState.sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
+		tessellationState.patchControlPoints = 3;
 
 		VkPipelineRasterizationStateCreateInfo rasterizationState = {};
 		rasterizationState.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
@@ -119,10 +150,11 @@ void RenderPipeline::Allocate(Engine* instance)
 		vertexInputState.vertexAttributeDescriptionCount = static_cast<uint32_t>(m_vertexAttributes.size());
 		vertexInputState.pVertexAttributeDescriptions = m_vertexAttributes.data();
 
-		pipelineCreateInfo.stageCount = sizeof(shaderStages) / sizeof(*shaderStages);
-		pipelineCreateInfo.pStages = shaderStages;
+		pipelineCreateInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+		pipelineCreateInfo.pStages = shaderStages.data();
 		pipelineCreateInfo.pVertexInputState = &vertexInputState;
 		pipelineCreateInfo.pInputAssemblyState = &inputAssemblyState;
+		pipelineCreateInfo.pTessellationState = &tessellationState;
 		pipelineCreateInfo.pRasterizationState = &rasterizationState;
 		pipelineCreateInfo.pColorBlendState = &colorBlendState;
 		pipelineCreateInfo.pMultisampleState = &multisampleState;
@@ -133,10 +165,12 @@ void RenderPipeline::Allocate(Engine* instance)
 		success = vkCreateGraphicsPipelines(device, NULL, 1, &pipelineCreateInfo, NULL, &m_gpuHandle->m_pipeline) == VK_SUCCESS;
 	}
 
-	if (shaderStages[0].module != VK_NULL_HANDLE)
-		vkDestroyShaderModule(device, shaderStages[0].module, NULL);
-	if (shaderStages[1].module != VK_NULL_HANDLE)
-		vkDestroyShaderModule(device, shaderStages[1].module, NULL);
+	for (size_t i = 0; i < shaderStages.size(); i++)
+	{
+		VkShaderModule mod = shaderStages[i].module;
+		if(mod != VK_NULL_HANDLE)
+			vkDestroyShaderModule(device, mod, NULL);
+	}
 
 	if (!success)
 	{

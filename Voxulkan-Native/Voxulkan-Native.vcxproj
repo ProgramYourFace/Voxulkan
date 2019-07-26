@@ -51,6 +51,8 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="src\Shaders\Surface.frag" />
+    <None Include="src\Shaders\Surface.tesc" />
+    <None Include="src\Shaders\Surface.tese" />
     <None Include="src\Shaders\Surface.vert" />
     <None Include="src\Shaders\SphereForm.comp" />
     <None Include="src\Shaders\SurfaceAnalysis.comp" />

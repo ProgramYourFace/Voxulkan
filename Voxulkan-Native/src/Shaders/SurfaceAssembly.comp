@@ -1,6 +1,6 @@
 #version 450
 
-layout(rgba8, set = 0, binding = 0) uniform restrict readonly image3D colorMap;
+layout(rg8ui, set = 0, binding = 0) uniform restrict readonly uimage3D colorMap;
 layout(r32ui, set = 0, binding = 1) uniform restrict readonly uimage3D indexMap;
 layout(set = 0, binding = 2) buffer restrict readonly cellBuffer
 {
@@ -9,8 +9,8 @@ layout(set = 0, binding = 2) buffer restrict readonly cellBuffer
 
 struct Vertex
 {
-vec3 pos;
-uint nrm_idx;
+	vec3 pos;
+	uint nrm_idx;
 };
 layout(set = 0, binding = 3) buffer restrict writeonly vertexBuffer
 {
@@ -30,7 +30,8 @@ layout(set = 0, binding = 5) buffer restrict readonly attributes
 layout(push_constant) uniform PushConstants
 {
 	uvec3 viewOffset;
-	uvec3 viewRange;
+	vec3 offset;
+	vec3 scale;
 };
 
 uvec3 cornerIMap[8] = uvec3[](
@@ -319,11 +320,9 @@ int[]( 0, 3, 8,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1, 3),
 int[](-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1, 0)
 );
 
-#define ISO 0.5
-
 float findISO(in float d1, in float d2)
 {
-	return clamp((ISO - d1) / (d2 - d1), 0.0, 1.0);
+	return clamp((0.5-d1) / (d2 - d1), 0.0, 1.0);
 }
 
 uint SNORM_2_UINT(vec3 v)
@@ -332,12 +331,18 @@ uint SNORM_2_UINT(vec3 v)
 	v = clamp(v, 0.0, 1.0);
 	return (uint(255 * v.x) & 0xFF) | ((uint(255 * v.y) & 0xFF) << 8) | ((uint(255 * v.z) & 0xFF) << 16);
 }
+float UINT_2_FLOAT(in uint v)
+{
+	return (v/255.0);
+}
 
 uvec2 GetVertIDXAndFlag(in ivec3 pos)
 {
 	uint idxMVal = imageLoad(indexMap, pos).r;
 	return uvec2(idxMVal >> 3, idxMVal & 7);
 }
+
+#define ISO 128
 
 layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 void main()
@@ -349,14 +354,18 @@ void main()
 	ivec3 pos = ivec3(cellInfo.x & 0xFF, (cellInfo.x >> 8) & 0xFF, (cellInfo.x >> 16) & 0xFF);
 	ivec3 colorPos = pos + ivec3(viewOffset);
 
-	#define L(p) imageLoad(colorMap, colorPos + (p)).a
+	uvec2 d = imageLoad(colorMap, colorPos).rg;
+	uvec2 dx = imageLoad(colorMap, colorPos + ivec3(1,0,0)).rg;
+	uvec2 dy = imageLoad(colorMap, colorPos + ivec3(0,1,0)).rg;
+	uvec2 dz = imageLoad(colorMap, colorPos + ivec3(0,0,1)).rg;
+	#define L(p) UINT_2_FLOAT(imageLoad(colorMap, colorPos + (p)).r)
 
 	float D[] = float[]
 	(
-		imageLoad(colorMap, colorPos).a,//0
-		L(ivec3(1,0,0)),//1
-		L(ivec3(0,1,0)),//2
-		L(ivec3(0,0,1)),//3
+		UINT_2_FLOAT(d.r),//0
+		UINT_2_FLOAT(dx.r),//1
+		UINT_2_FLOAT(dy.r),//2
+		UINT_2_FLOAT(dz.r),//3
 		L(ivec3(-1,0,0)),//4
 		L(ivec3(0,-1,0)),//5
 		L(ivec3(0,0,-1)),//6
@@ -386,39 +395,40 @@ void main()
 	Vertex v;
 	float t;
 	vec3 n;
+	bool cSolid = d.r < ISO;
 	if((cornerFlag & 1) != 0)//Z
 	{
 		t = findISO(D[0], D[3]);
-		v.pos = pos + vec3(0.0, 0.0, t);
+		v.pos = offset + scale * (pos + vec3(0.0, 0.0, t));
 		n = vec3(mix(D[1], D[13], t) - mix(D[4], D[14], t),
 		mix(D[2], D[10], t) - mix(D[5], D[11], t),
 		mix(D[3], D[9], t) - mix(D[6], D[0], t));
 		n /= max(max(abs(n.x), abs(n.y)), abs(n.z));
-		v.nrm_idx = SNORM_2_UINT(n);
+		v.nrm_idx = SNORM_2_UINT(n) | ((cSolid ? d.g : dz.g) << 24);
 		verts[vertOffset] = v;
 		o++;
 	}
 	if((cornerFlag & 2) != 0)//X
 	{
 		t = findISO(D[0], D[1]);
-		v.pos = pos + vec3(t, 0.0, 0.0);
+		v.pos = offset + scale * (pos + vec3(t, 0.0, 0.0));
 		n = vec3(mix(D[1], D[7], t) - mix(D[4], D[0], t),
 		mix(D[2], D[16], t) - mix(D[5], D[17], t),
 		mix(D[3], D[13], t) - mix(D[6], D[15], t));
 		n /= max(max(abs(n.x), abs(n.y)), abs(n.z));
-		v.nrm_idx = SNORM_2_UINT(n);
+		v.nrm_idx = SNORM_2_UINT(n) | ((cSolid ? d.g : dx.g) << 24);
 		verts[vertOffset + o] = v;
 		o++;
 	}
 	if((cornerFlag & 4) != 0)//Y
 	{
 		t = findISO(D[0], D[2]);
-		v.pos = pos + vec3(0.0, t, 0.0);
+		v.pos = offset + scale * (pos + vec3(0.0, t, 0.0));
 		n = vec3(mix(D[1], D[16], t) - mix(D[4], D[18], t),
 		mix(D[2], D[8], t) - mix(D[5], D[0], t),
 		mix(D[3], D[10], t) - mix(D[6], D[12], t));
 		n /= max(max(abs(n.x), abs(n.y)), abs(n.z));
-		v.nrm_idx = SNORM_2_UINT(n);
+		v.nrm_idx = SNORM_2_UINT(n) | ((cSolid ? d.g : dy.g) << 24);
 		verts[vertOffset + o] = v;
 	}
 

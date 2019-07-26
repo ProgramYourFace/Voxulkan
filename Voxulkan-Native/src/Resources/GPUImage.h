@@ -5,6 +5,7 @@ struct GPUImageHandle : GPUResourceHandle
 {
 	VkImage m_image = VK_NULL_HANDLE;
 	VkImageView m_view = VK_NULL_HANDLE;
+	VkSampler m_sampler = VK_NULL_HANDLE;
 	VmaAllocation m_allocation = VK_NULL_HANDLE;
 
 	void Deallocate(Engine* instance) override;
@@ -25,7 +26,13 @@ public:
 	VmaMemoryUsage m_memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY;
 	VkImageUsageFlags m_usage = VK_IMAGE_USAGE_SAMPLED_BIT;
 	VkImageType m_type = VK_IMAGE_TYPE_2D;
+	VkImageViewType m_viewType = VK_IMAGE_VIEW_TYPE_2D;
 	VkFormat m_format = VK_FORMAT_R8G8B8A8_UNORM;
 	VkImageTiling m_tiling = VK_IMAGE_TILING_OPTIMAL;
 	VkExtent3D m_size = {0,0,0};
+	uint32_t m_arraySize = 1;
+	bool m_createView = true;
+	bool m_createSampler = false;
+	VkSamplerAddressMode wrapMode = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	float m_maxAnistrophy = 16.0f;
 };

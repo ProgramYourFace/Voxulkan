@@ -1,5 +1,4 @@
 #pragma once
-#include <vector>
 #include "Pipeline.h"
 
 class RenderPipeline : public Pipeline
@@ -8,12 +7,11 @@ public:
 	void AllocateOnRenderPass(Engine* instance, VkRenderPass renderPass);
 	void Allocate(Engine* instance) override;
 
-	//Layout info
-	std::vector<VkPushConstantRange> m_pushConstants;
-
 	//Shader info
 	std::vector<char> m_vertexShader;
 	std::vector<char> m_fragmentShader;
+	std::vector<char> m_tessCtrlShader;
+	std::vector<char> m_tessEvalShader;
 
 	//Pipeline info
 	bool m_wireframe = false;

@@ -1,6 +1,6 @@
 #version 450
 
-layout(rgba8, set = 0, binding = 0) uniform restrict readonly image3D colorMap;
+layout(rg8ui, set = 0, binding = 0) uniform restrict readonly uimage3D colorMap;
 layout(r32ui, set = 0, binding = 1) uniform restrict writeonly uimage3D indexMap;
 layout(set = 0, binding = 2) buffer restrict writeonly cellBuffer
 {
@@ -79,7 +79,7 @@ uint cornerFlags[256] = uint[]
 	4 ,3 ,5 ,2 ,4 ,3 ,5 ,2 ,6 ,1 ,7 ,0 ,6 ,1 ,7 ,0 
 );
 
-#define ISO 0.5
+#define ISO 128
 
 layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
 void main()
@@ -90,22 +90,22 @@ void main()
 
 	ivec3 cell = ivec3(gl_GlobalInvocationID.xyz + viewOffset.xyz);
 	uint cubeFlag = 0;
-	if (imageLoad(colorMap, cell).a < ISO) cubeFlag |= 1;
+	if (imageLoad(colorMap, cell).r < ISO) cubeFlag |= 1;
 	
 	if(gl_GlobalInvocationID.z == viewRange.z) cubeFlag |= (cubeFlag & 1) << 1;
-	else if (imageLoad(colorMap, cell+ivec3(0,0,1)).a < ISO) cubeFlag |= 2;
+	else if (imageLoad(colorMap, cell+ivec3(0,0,1)).r < ISO) cubeFlag |= 2;
 	
-	if (imageLoad(colorMap, cell+ivec3(1,0,1)).a < ISO) cubeFlag |= 4;
+	if (imageLoad(colorMap, cell+ivec3(1,0,1)).r < ISO) cubeFlag |= 4;
 
 	if(gl_GlobalInvocationID.x == viewRange.x) cubeFlag |= (cubeFlag & 1) << 3;
-	else if (imageLoad(colorMap, cell+ivec3(1,0,0)).a < ISO) cubeFlag |= 8;
+	else if (imageLoad(colorMap, cell+ivec3(1,0,0)).r < ISO) cubeFlag |= 8;
 	
 	if(gl_GlobalInvocationID.y == viewRange.y) cubeFlag |= (cubeFlag & 1) << 4;
-	else if (imageLoad(colorMap, cell+ivec3(0,1,0)).a < ISO) cubeFlag |= 16;
+	else if (imageLoad(colorMap, cell+ivec3(0,1,0)).r < ISO) cubeFlag |= 16;
 
-	if (imageLoad(colorMap, cell+ivec3(0,1,1)).a < ISO) cubeFlag |= 32;
-	if (imageLoad(colorMap, cell+ivec3(1,1,1)).a < ISO) cubeFlag |= 64;
-	if (imageLoad(colorMap, cell+ivec3(1,1,0)).a < ISO) cubeFlag |= 128;
+	if (imageLoad(colorMap, cell+ivec3(0,1,1)).r < ISO) cubeFlag |= 32;
+	if (imageLoad(colorMap, cell+ivec3(1,1,1)).r < ISO) cubeFlag |= 64;
+	if (imageLoad(colorMap, cell+ivec3(1,1,0)).r < ISO) cubeFlag |= 128;
 
 	if(cubeFlag != 0 && cubeFlag != 0xFF)
 	{

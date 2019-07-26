@@ -13,8 +13,10 @@ if not exist !outdir! mkdir !outdir!
 set output=%%f.bytes
 call set output=%%output:%~dp0=%comp_to%\%%
 
+IF NOT "!output:~-12,1!"=="I" (
 %VULKAN_SDK%/Bin32/glslangValidator.exe -V %%f -o !output!
 echo to !output!
+)
 )
 
 if ["%~1"]==[""] (

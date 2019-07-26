@@ -12,7 +12,7 @@ struct GPUBufferHandle : GPUResourceHandle
 class GPUBuffer : public GPUResource
 {
 public:
-	void UploadData(Engine* instance, void* data, const size_t& byteCount);
+	void UploadData(Engine* instance, void* data, size_t byteCount);
 
 	void Allocate(Engine* instance) override;
 	void Release(Engine* instance) override;

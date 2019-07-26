@@ -3,7 +3,7 @@
 #include "..\\Plugin.h"
 
 
-void GPUBuffer::UploadData(Engine* instance, void* data, const size_t& byteCount)
+void GPUBuffer::UploadData(Engine* instance, void* data, size_t byteCount)
 {
 	VmaAllocator allocator = instance->Allocator();
 	void* mappedData;

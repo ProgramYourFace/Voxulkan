@@ -11,19 +11,29 @@ namespace Voxulkan
     [RequireComponent(typeof(Camera))]
     public class NativeCamera : MonoBehaviour
     {
+        public float tessellationFactor = 1.0f;
+
         IntPtr nativeCamera;
         new Camera camera;
         CommandBuffer commandBuffer;
         const CameraEvent NATIVE_INJECTION_POINT = CameraEvent.BeforeForwardOpaque;
 
+        [StructLayout(LayoutKind.Sequential)]
+        struct CameraConstants
+        {
+            public Matrix4x4 viewProjection;
+            public Vector3 cameraPos;
+            public float tessellationFactor;
+        }
+
         [DllImport(Native.DLL)]
-        public static extern IntPtr GetRenderInjection();
+        static extern IntPtr GetRenderInjection();
         [DllImport(Native.DLL)]
-        public static extern IntPtr CreateNativeCamera(IntPtr instance);
+        static extern IntPtr CreateNativeCamera(IntPtr instance);
         [DllImport(Native.DLL)]
-        public static extern void DestroyNativeCamera(IntPtr camera);
+        static extern void DestroyNativeCamera(IntPtr camera);
         [DllImport(Native.DLL)]
-        public static extern void SetCameraVP(IntPtr camera, Matrix4x4 mvp);
+        static extern void SetCameraVP(IntPtr camera, CameraConstants constants);
 
         void Awake()
         {
@@ -37,7 +47,11 @@ namespace Voxulkan
 
         void OnPreRender()
         {
-            SetCameraVP(nativeCamera, camera.GetNativeViewProjection());
+            CameraConstants constants = new CameraConstants();
+            constants.viewProjection = camera.GetNativeViewProjection();
+            constants.cameraPos = transform.position;
+            constants.tessellationFactor = tessellationFactor;
+            SetCameraVP(nativeCamera, constants);
         }
 
         void OnEnable()

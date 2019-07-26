@@ -4,6 +4,13 @@
 
 class Engine;
 
+struct CameraConstants
+{
+	glm::mat4x4 viewProjection = {};
+	glm::vec3 worldPosition = {};
+	float tessellationFactor = 0.0f;
+};
+
 class Camera
 {
 public:
@@ -12,5 +19,6 @@ public:
 	Camera(Engine* instance);
 
 	Engine* m_instance = nullptr;
-	std::atomic<glm::mat4x4> m_VP_Matrix;
+	
+	volatile CameraConstants m_constants = {};
 };

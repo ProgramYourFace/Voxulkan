@@ -20,6 +20,16 @@ void Pipeline::Release(Engine* instance)
 	SAFE_DESTROY(m_gpuHandle);
 }
 
+void Pipeline::DestroyDSetLayouts(Engine* instance)
+{
+	VkDevice device = instance->Device();
+	for (int i = 0; i < m_descriptorSetLayouts.size(); i++)
+	{
+		VkDescriptorSetLayout dsl = m_descriptorSetLayouts[i];
+		vkDestroyDescriptorSetLayout(device, dsl, nullptr);
+	}
+}
+
 void PipelineHandle::Deallocate(Engine* instance)
 {
 	VkDevice dev = instance->Device();

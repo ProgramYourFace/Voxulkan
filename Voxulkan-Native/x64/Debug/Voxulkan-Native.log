@@ -8,6 +8,12 @@
   to D:\Projects_Unity\_GitHub\Voxulkan\Assets\Shaders\Resources\NativeShaders\SurfaceAnalysis.comp.bytes
   D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Shaders\SurfaceAssembly.comp
   to D:\Projects_Unity\_GitHub\Voxulkan\Assets\Shaders\Resources\NativeShaders\SurfaceAssembly.comp.bytes
+  D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Shaders\Surface.tesc
+  to D:\Projects_Unity\_GitHub\Voxulkan\Assets\Shaders\Resources\NativeShaders\Surface.tesc.bytes
+  D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Shaders\Surface.tese
+  to D:\Projects_Unity\_GitHub\Voxulkan\Assets\Shaders\Resources\NativeShaders\Surface.tese.bytes
+  VoxelBody.cpp
   Engine.cpp
+  Generating Code...
   Voxulkan-Native.vcxproj -> D:\Projects_Unity\_GitHub\Voxulkan\x64\Debug\GfxPluginVoxulkan-Native.dll
           1 file(s) copied.
