@@ -2,6 +2,14 @@
 
 layout(rg8ui, set = 0, binding = 0) uniform restrict writeonly uimage3D colorMap;
 
+layout(push_constant) uniform FormConstants
+{
+	uvec3 offset;
+	uvec3 range;
+	float scale;
+	mat4x4 transform;
+};
+
 //	Simplex 3D Noise 
 //	by Ian McEwan, Ashima Arts
 //
@@ -92,11 +100,12 @@ float sdBox( vec3 p, vec3 b )
 layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
 void main()
 {
-	vec3 p = gl_GlobalInvocationID.xyz;
-	vec3 delta = p - 16.0;
-	float l = length(delta);
-	float dencity = l - 16.0;
-	//dencity += snoise(p / 7.5) * 3.0;
-	uint id = gl_GlobalInvocationID.x > 16 ? 1 : 0;
-	imageStore(colorMap, ivec3(gl_GlobalInvocationID.xyz), uvec4(FLOAT_2_UINT(dencity), id,0,0));
+	if(gl_GlobalInvocationID.x >= range.x || gl_GlobalInvocationID.y >= range.y || gl_GlobalInvocationID.z >= range.z)return;
+	vec3 p = (transform * vec4(gl_GlobalInvocationID.xyz, 1.0)).xyz;
+	float l = length(p);
+	float dencity = l - 800.0;
+	dencity += snoise(p / 100.0f) * 50.0;
+	uint id = p.x > 0.0 ? 1 : 0;
+	dencity *= scale;
+	imageStore(colorMap, ivec3(gl_GlobalInvocationID.xyz + offset), uvec4(FLOAT_2_UINT(dencity), id,0,0));
 }

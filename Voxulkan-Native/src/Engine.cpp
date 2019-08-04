@@ -1,9 +1,6 @@
 #include "Engine.h"
 #include "Plugin.h"
-#include "Components/VoxelBody.h"
-#include <sstream>
-#include <vector>
-#include <thread>
+#include <algorithm>
 
 Engine::Engine(IUnityGraphicsVulkan* unityVulkan)
 {
@@ -16,11 +13,12 @@ Engine::Engine(IUnityGraphicsVulkan* unityVulkan)
 	vmaCreateAllocator(&allocatorInfo, &m_allocator);
 }
 
-void Engine::RegisterComputeQueues(std::vector<VkQueue> queues, const uint32_t& queueFamily)
+void Engine::RegisterQueues(std::vector<VkQueue> queues, const uint32_t& queueFamily, VkQueue occlusionQueue)
 {
-	if (m_queues != nullptr || m_workers != nullptr)
+	if (m_queues != nullptr || m_workers != nullptr || m_occlusionQueue != nullptr)
 		return;
 
+	m_occlusionQueue = occlusionQueue;
 	m_computeQueueFamily = queueFamily;
 	m_queueCount = static_cast<uint8_t>(queues.size());
 	m_workerCount = GetWorkerCount();
@@ -30,38 +28,66 @@ void Engine::RegisterComputeQueues(std::vector<VkQueue> queues, const uint32_t& 
 		LOG("Queue count is some how larger than worker count!");
 	}
 
-	VkCommandPoolCreateInfo cmdPoolInfo = {};
-	cmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-	cmdPoolInfo.queueFamilyIndex = m_computeQueueFamily;
-	cmdPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-
-	vkCreateCommandPool(m_instance.device, &cmdPoolInfo, nullptr, &m_computeCmdPool);
-
-	std::vector<VkCommandBuffer> workerCMDBs(m_workerCount);
+	VkCommandPoolCreateInfo computeCMDPoolInfo = {};
+	computeCMDPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	computeCMDPoolInfo.queueFamilyIndex = m_computeQueueFamily;
+	computeCMDPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
 	VkCommandBufferAllocateInfo workerCMDBInfo = {};
 	workerCMDBInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-	workerCMDBInfo.commandBufferCount = m_workerCount;
-	workerCMDBInfo.commandPool = m_computeCmdPool;
 	workerCMDBInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	workerCMDBInfo.commandBufferCount = Engine::WORKER_CMDB_COUNT;
 
-	VK_CALL(vkAllocateCommandBuffers(m_instance.device, &workerCMDBInfo, workerCMDBs.data()));
+	VkCommandPoolCreateInfo renderCMDPoolInfo = {};
+	renderCMDPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	renderCMDPoolInfo.queueFamilyIndex = m_instance.queueFamilyIndex;
+	renderCMDPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+
+	VkCommandBufferAllocateInfo renderCMDBInfo = {};
+	renderCMDBInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	renderCMDBInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	renderCMDBInfo.commandBufferCount = 1;
+
+	VkFenceCreateInfo fenceCI = {};
+	fenceCI.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	fenceCI.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+	VkEventCreateInfo eventCI = {};
+	eventCI.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
+
+	uint32_t fenceCount = m_queueCount * Engine::WORKER_CMDB_COUNT;
+	VkFence* fences = new VkFence[fenceCount];
+	for (uint8_t i = 0; i < fenceCount; i++)
+	{
+		VK_CALL(vkCreateFence(m_instance.device, &fenceCI, nullptr, fences + i));
+	}
 
 	m_queues = new QueueResource[m_queueCount];
 	m_workers = new WorkerResource[m_workerCount];
 	uint8_t workerStart = 0;
-	for (int i = 0; i < m_queueCount; i++)
+	for (uint8_t i = 0; i < m_queueCount; i++)
 	{
 		QueueResource& qr = m_queues[i];
 		qr.m_queue = queues[i];
+		qr.m_currentCMDB = 0;
+		qr.m_fences = fences + i * (uint64_t)Engine::WORKER_CMDB_COUNT;
 		qr.m_workerStart = workerStart;
 		qr.m_workerEnd = ((i + 1) * m_workerCount) / m_queueCount;
 		workerStart = qr.m_workerEnd;
-		for (int j = qr.m_workerStart; j < qr.m_workerEnd; j++)
+		for (uint32_t j = qr.m_workerStart; j < qr.m_workerEnd; j++)
 		{
 			WorkerResource& wr = m_workers[j];
 			wr.m_queueIndex = i;
-			wr.m_CMDB = workerCMDBs[j];
+
+			VK_CALL(vkCreateCommandPool(m_instance.device, &computeCMDPoolInfo, nullptr, &wr.m_computeCMDPool));
+			workerCMDBInfo.commandPool = wr.m_computeCMDPool;
+			wr.m_computeCMDBs = std::vector<VkCommandBuffer>(workerCMDBInfo.commandBufferCount);
+			VK_CALL(vkAllocateCommandBuffers(m_instance.device, &workerCMDBInfo, wr.m_computeCMDBs.data()));
+
+			VK_CALL(vkCreateCommandPool(m_instance.device, &renderCMDPoolInfo, nullptr, &wr.m_queryCMDPool));
+			renderCMDBInfo.commandPool = wr.m_queryCMDPool;
+			VK_CALL(vkAllocateCommandBuffers(m_instance.device, &renderCMDBInfo, &wr.m_queryCMDB));
+			VK_CALL(vkCreateFence(m_instance.device, &fenceCI, nullptr, &wr.m_queryFence));
+			VK_CALL(vkCreateEvent(m_instance.device, &eventCI, nullptr, &wr.m_queryEvent));
 		}
 	}
 }
@@ -79,7 +105,6 @@ void Engine::SetComputeShaders(const std::vector<char>& surfaceAnalysis, const s
 	m_surfaceAnalysisPipeline.m_shader = surfaceAnalysis;
 	m_surfaceAssemblyPipeline.m_shader = surfaceAssembly;
 }
-
 
 void Engine::SetMaterialResources(void* attributesBuffer, uint32_t attribsByteCount,
 	void* colorSpecData, uint32_t csWidth, uint32_t csHeight,
@@ -133,7 +158,7 @@ void Engine::SetMaterialResources(void* attributesBuffer, uint32_t attribsByteCo
 		vmaFlushAllocation(m_allocator, sb.m_gpuHandle->m_allocation, 0, sb.m_byteCount);
 	}
 
-	VkCommandBuffer cmdb = m_workers[0].m_CMDB;
+	VkCommandBuffer cmdb = m_workers[0].m_computeCMDBs[0];
 	VkQueue q = m_queues[0].m_queue;
 	VkCommandBufferBeginInfo beginI = {};
 	beginI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -219,58 +244,23 @@ void Engine::InitializeResources()
 	m_loadingFrame.store(0);
 	InitializeRenderPipeline();
 	InitializeComputePipelines();
-	InitializeStagingResources(10); //TODO: Replace constant with variable
+	InitializeStagingResources(50); //TODO: Replace constant with variable
 	
 	GarbageCollect(GC_FORCE_COMPLETE);
 }
 
 void Engine::ReleaseResources()
 {
+	vkDeviceWaitIdle(m_instance.device);
 	ReleaseStagingResources();
 	ReleaseRenderPipelines();
 	ReleaseComputePipelines();
 	m_surfaceAttributesBuffer.Release(this);
 	m_surfaceColorSpecTex.Release(this);
 	m_surfaceNrmHeightTex.Release(this);
-	/*m_vertexBuffer.Release(this);
-	m_indexBuffer.Release(this);*/
 
 	GarbageCollect(GC_FORCE_COMPLETE);
 	vmaDestroyAllocator(m_allocator);
-	vkDestroyCommandPool(m_instance.device, m_computeCmdPool, nullptr);
-}
-
-void Engine::SubmitRender()
-{
-	size_t renderSize = 0;
-	for (int i = 0; i < m_workerCount; i++)
-		renderSize += m_workers[i].m_render.size();
-
-	size_t pos = 0;
-	std::vector<BodyRenderPackage> newRender(renderSize);
-	for (int i = 0; i < m_workerCount; i++)
-	{
-		WorkerResource& wr = m_workers[i];
-		size_t rs = wr.m_render.size();
-		std::move(wr.m_render.begin(), wr.m_render.end(), newRender.begin() + pos);
-		wr.m_render.clear();
-		pos += rs;
-	}
-
-	m_renderLock.lock();
-	m_render.swap(newRender);
-	m_renderLock.unlock();
-	
-	for (size_t i = 0; i < newRender.size(); i++)
-	{
-		BodyRenderPackage& brp = newRender[i];
-		brp.m_constants->Unpin();
-		for (size_t j = 0; j < brp.m_chunks.size(); j++)
-		{
-			brp.m_chunks[j].m_indexBuffer->Unpin();
-			brp.m_chunks[j].m_vertexBuffer->Unpin();
-		}
-	}
 }
 
 void Engine::SubmitQueue(uint8_t queueIndex)
@@ -282,11 +272,13 @@ void Engine::SubmitQueue(uint8_t queueIndex)
 	for (int i = qr.m_workerStart; i < qr.m_workerEnd; i++)
 	{
 		WorkerResource& wr = m_workers[i];
+
 		if (wr.m_recordingCmds)
 		{
-			VK_CALL(vkEndCommandBuffer(wr.m_CMDB));
+			VkCommandBuffer cmdb = wr.m_computeCMDBs[qr.m_currentCMDB];
+			VK_CALL(vkEndCommandBuffer(cmdb));
 			wr.m_recordingCmds = false;
-			cmds[cmdbCount] = wr.m_CMDB;
+			cmds[cmdbCount] = cmdb;
 			cmdbCount++;
 		}
 	}
@@ -297,11 +289,43 @@ void Engine::SubmitQueue(uint8_t queueIndex)
 		subI.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 		subI.commandBufferCount = cmdbCount;
 		subI.pCommandBuffers = cmds.data();
-		VK_CALL(vkQueueSubmit(qr.m_queue, 1, &subI, nullptr));
-		VK_CALL(vkQueueWaitIdle(qr.m_queue));//TODO: Add fence system to counteract useless pausing
-
+		vkResetFences(m_instance.device, 1, &qr.m_fences[qr.m_currentCMDB]);
+		VK_CALL(vkQueueSubmit(qr.m_queue, 1, &subI, qr.m_fences[qr.m_currentCMDB]));
+		qr.m_currentCMDB = (qr.m_currentCMDB + 1) % Engine::WORKER_CMDB_COUNT;
 	}
 }
+
+void Engine::QueryOcclusion(Camera* camera, uint8_t workerIndex)
+{
+	std::vector<BodyRenderPackage> render = m_render.vector();
+	CameraView cameraConsts = const_cast<CameraView&>(camera->m_view);
+	for (size_t i = 0; i < render.size(); i++)
+	{
+		BodyRenderPackage& r = render[i];
+		glm::vec3 cPos = glm::inverse(const_cast<glm::mat4x4&>(r.transform)) * glm::vec4(cameraConsts.worldPosition, 1.0);
+		glm::vec3 delta = cPos - glm::clamp(cPos, r.min, r.max);
+		r.distance = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
+		
+		for (size_t j = 0; j < r.chunks.size(); j++)
+		{
+			ChunkRenderPackage& chunk = r.chunks[j];
+			delta = cPos - glm::clamp(cPos, chunk.min, chunk.max);
+			chunk.distance = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
+		}
+		std::sort(r.chunks.begin(), r.chunks.end());
+	}
+	std::sort(render.begin(), render.end());
+
+	camera->m_renderPackage.swap(render);
+}
+
+void Engine::ClearRender()
+{
+	m_render.clear();
+}
+
+//#include <chrono>
+//typedef std::chrono::high_resolution_clock Clock;
 
 void Engine::Draw(Camera* camera)
 {
@@ -317,37 +341,42 @@ void Engine::Draw(Camera* camera)
 	m_renderPipeline.AllocateOnRenderPass(this, recordingState.renderPass);
 	m_renderPipeline.GetVkPipeline(pipeline, layout);
 	
-	if (pipeline && layout)
-	{
-		CameraConstants cameraConsts = const_cast<CameraConstants&>(camera->m_constants);
-		const VkDeviceSize offset = 0;
-		vkCmdBindPipeline(recordingState.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-		vkCmdBindDescriptorSets(recordingState.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &m_renderDSet, 0, nullptr);
-		vkCmdPushConstants(recordingState.commandBuffer, layout,
-			VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT |
-			VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT |
-			VK_SHADER_STAGE_FRAGMENT_BIT,
-			0, sizeof(CameraConstants), &cameraConsts);
+	CameraView cameraConsts = const_cast<CameraView&>(camera->m_view);
+	const VkDeviceSize offset = 0;
+	vkCmdBindPipeline(recordingState.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+	vkCmdBindDescriptorSets(recordingState.commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1, &m_renderDSet, 0, nullptr);
 
-		m_renderLock.lock();
-		for (size_t i = 0; i < m_render.size(); i++)
-		{
-			BodyRenderPackage& brp = m_render[i];
-			//TODO: Write matrix push constants
-			for (size_t j = 0; j < brp.m_chunks.size(); j++)
-			{
-				ChunkRenderPackage crp = brp.m_chunks[j];
-				vkCmdBindVertexBuffers(recordingState.commandBuffer, 0, 1, &crp.m_vertexBuffer->m_buffer, &offset);
-				vkCmdBindIndexBuffer(recordingState.commandBuffer, crp.m_indexBuffer->m_buffer, 0, VK_INDEX_TYPE_UINT32);
-				vkCmdDrawIndexed(recordingState.commandBuffer, crp.m_indexCount, 1, 0, 0, 0);
-			}
-		}
-		m_renderLock.unlock();
-	}
-	else
+	//auto t1 = Clock::now();
+	camera->m_renderPackage.lock();
+	for (size_t i = 0; i < camera->m_renderPackage.size(); i++)
 	{
-		LOG("pipeline or layout is null");
+		BodyRenderPackage& brp = camera->m_renderPackage[i];
+
+		ChunkPipelineConstants cpc = {};
+		cpc.model = const_cast<glm::mat4x4&>(brp.transform);
+		cpc.mvp = cameraConsts.viewProjection * cpc.model;
+		cpc.tessellationFactor = cameraConsts.tessellationFactor;
+		cpc.worldPosition = cameraConsts.worldPosition;
+
+		vkCmdPushConstants(recordingState.commandBuffer, layout, RENDER_CONST_STAGE_BIT,
+			0, sizeof(ChunkPipelineConstants), &cpc);
+
+		for (size_t j = 0; j < brp.chunks.size(); j++)
+		{
+			ChunkRenderPackage crp = brp.chunks[j];
+			vkCmdBindVertexBuffers(recordingState.commandBuffer, 0, 1, &crp.vertexBuffer->m_buffer, &offset);
+			vkCmdBindIndexBuffer(recordingState.commandBuffer, crp.indexBuffer->m_buffer, 0, VK_INDEX_TYPE_UINT32);
+			vkCmdDrawIndexed(recordingState.commandBuffer, crp.indexCount, 1, 0, 0, 0);
+		}
 	}
+	camera->m_renderPackage.unlock();
+	/*
+	auto t2 = Clock::now();
+	std::stringstream ss;
+	ss << "Delta t2-t1: "
+		<< std::chrono::duration_cast<std::chrono::nanoseconds>(t2 - t1).count()
+		<< " nanoseconds" << std::endl;
+	LOG(ss.str());*/
 }
 
 ComputePipeline* Engine::CreateFormPipeline(const std::vector<char>& shader)
@@ -356,6 +385,10 @@ ComputePipeline* Engine::CreateFormPipeline(const std::vector<char>& shader)
 	form->m_shader = shader;
 	form->m_descriptorSetLayouts = std::vector<VkDescriptorSetLayout>(1);
 	form->m_descriptorSetLayouts[0] = m_formDSetLayout;
+	form->m_pushConstants = std::vector<VkPushConstantRange>(1);
+	form->m_pushConstants[0].offset = 0;
+	form->m_pushConstants[0].size = sizeof(FormConstants);
+	form->m_pushConstants[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 	form->Allocate(this);
 	return form;
 }
@@ -373,7 +406,7 @@ void Engine::DestroyResources(const std::vector<GPUResourceHandle*>& resources)
 
 uint8_t Engine::GetWorkerCount()
 {
-	return std::thread::hardware_concurrency() - 1;;
+	return std::thread::hardware_concurrency();
 }
 
 void Engine::InitializeRenderPipeline()
@@ -385,8 +418,8 @@ void Engine::InitializeRenderPipeline()
 
 	std::vector<VkPushConstantRange> pushConstants(1);
 	pushConstants[0].offset = 0;
-	pushConstants[0].size = sizeof(CameraConstants);
-	pushConstants[0].stageFlags = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT | VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	pushConstants[0].size = sizeof(ChunkPipelineConstants);
+	pushConstants[0].stageFlags = RENDER_CONST_STAGE_BIT;
 	m_renderPipeline.m_pushConstants = pushConstants;
 
 	std::vector<VkDescriptorSetLayout> dSetLayouts(1);
@@ -414,6 +447,7 @@ void Engine::InitializeRenderPipeline()
 		nullptr,
 		&dSetLayouts[0]));
 	m_renderPipeline.m_descriptorSetLayouts = dSetLayouts;
+
 
 	std::vector<VkVertexInputBindingDescription> vertexBindings(1);
 	vertexBindings[0].binding = 0;
@@ -446,7 +480,7 @@ void Engine::InitializeComputePipelines()
 	//Surface Cells buffer
 	//Stats/Vert buffer
 	//Tri buffer
-	std::vector<VkDescriptorSetLayoutBinding> bindings(6);
+	std::vector<VkDescriptorSetLayoutBinding> bindings(4);
 
 	//Color map
 	bindings[0].binding = 0;
@@ -502,24 +536,26 @@ void Engine::InitializeComputePipelines()
 	m_surfaceAnalysisPipeline.Allocate(this);
 
 	//Index buffer
-	bindings[4].binding = 4;
-	bindings[4].pImmutableSamplers = 0;
-	bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	bindings[4].descriptorCount = 1;
-	bindings[4].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	bindings[0].binding = 0;
+	bindings[0].pImmutableSamplers = 0;
+	bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	bindings[0].descriptorCount = 1;
+	bindings[0].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 	//Attribs buffer
-	bindings[5].binding = 5;
-	bindings[5].pImmutableSamplers = 0;
-	bindings[5].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-	bindings[5].descriptorCount = 1;
-	bindings[5].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+	bindings[1].binding = 1;
+	bindings[1].pImmutableSamplers = 0;
+	bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	bindings[1].descriptorCount = 1;
+	bindings[1].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
 
-	layoutCI.bindingCount = 6;
-	m_surfaceAssemblyPipeline.m_descriptorSetLayouts = std::vector<VkDescriptorSetLayout>(1);
+	layoutCI.bindingCount = 2;
+	layoutCI.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
+	m_surfaceAssemblyPipeline.m_descriptorSetLayouts = std::vector<VkDescriptorSetLayout>(2);
+	m_surfaceAssemblyPipeline.m_descriptorSetLayouts[0] = m_surfaceAnalysisPipeline.m_descriptorSetLayouts[0];
 	VK_CALL(vkCreateDescriptorSetLayout(m_instance.device,
 		&layoutCI,
 		nullptr,
-		m_surfaceAssemblyPipeline.m_descriptorSetLayouts.data()));
+		&m_surfaceAssemblyPipeline.m_descriptorSetLayouts[1]));
 
 	surfacePushConsts[0].size = sizeof(SurfaceAssemblyConstants);
 	m_surfaceAssemblyPipeline.m_pushConstants = surfacePushConsts;
@@ -537,7 +573,7 @@ void Engine::InitializeStagingResources(uint8_t poolSize)
 	std::vector<VkDescriptorPoolSize> DPSizes(4);
 	DPSizes[0].descriptorCount = poolSize * 5;
 	DPSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-	DPSizes[1].descriptorCount = poolSize * 6;
+	DPSizes[1].descriptorCount = poolSize * 4;
 	DPSizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 	//Rendering descriptor
 	DPSizes[2].descriptorCount = 1;
@@ -549,20 +585,12 @@ void Engine::InitializeStagingResources(uint8_t poolSize)
 	descPoolCI.pPoolSizes = DPSizes.data();
 	vkCreateDescriptorPool(m_instance.device, &descPoolCI, nullptr, &m_stagingDescriptorPool);
 
-	std::vector<VkDescriptorSetLayout> layouts(3);
-	layouts[0] = m_formDSetLayout;
-	layouts[1] = m_surfaceAnalysisPipeline.m_descriptorSetLayouts[0];
-	layouts[2] = m_surfaceAssemblyPipeline.m_descriptorSetLayouts[0];
-
 	VkDescriptorSetAllocateInfo allocInfo = {};
 	allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 	allocInfo.descriptorPool = m_stagingDescriptorPool;
 	allocInfo.descriptorSetCount = 1;
 	allocInfo.pSetLayouts = &m_renderPipeline.m_descriptorSetLayouts[0];
 	VK_CALL(vkAllocateDescriptorSets(m_instance.device, &allocInfo, &m_renderDSet));
-
-	allocInfo.descriptorSetCount = static_cast<uint32_t>(layouts.size());
-	allocInfo.pSetLayouts = layouts.data();
 
 	VkDescriptorImageInfo texCSI = {};
 	texCSI.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -591,8 +619,6 @@ void Engine::InitializeStagingResources(uint8_t poolSize)
 
 	vkUpdateDescriptorSets(m_instance.device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
-	std::vector<VkDescriptorSet> sets(3);
-
 	VkCommandPoolCreateInfo cmdPoolInfo = {};
 	cmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
 	cmdPoolInfo.queueFamilyIndex = m_computeQueueFamily;
@@ -617,7 +643,15 @@ void Engine::InitializeStagingResources(uint8_t poolSize)
 
 	std::vector<VkImageMemoryBarrier> imageBarriers((uint64_t)poolSize * 2);
 
-	m_stagingResources = new LFPoolQueue<ChunkStagingResources*>(poolSize);
+	std::vector<VkDescriptorSetLayout> layouts(3);
+	layouts[0] = m_formDSetLayout;
+	layouts[1] = m_surfaceAnalysisPipeline.m_descriptorSetLayouts[0];
+	layouts[2] = m_surfaceAssemblyPipeline.m_descriptorSetLayouts[0];
+	allocInfo.descriptorSetCount = static_cast<uint32_t>(layouts.size());
+	allocInfo.pSetLayouts = layouts.data();
+
+	std::vector<VkDescriptorSet> sets(3);
+	m_stagingResources = new LFPoolStack<ChunkStagingResources*>(poolSize);
 	for (uint32_t i = 0; i < m_stagingResources->size(); i++)
 	{
 		ChunkStagingResources* sRes = new ChunkStagingResources(this, CHUNK_SIZE, CHUNK_PADDING);
@@ -659,7 +693,7 @@ void Engine::ReleaseComputePipelines()
 {
 	m_surfaceAnalysisPipeline.Release(this);
 	m_surfaceAssemblyPipeline.Release(this);
-	m_surfaceAnalysisPipeline.DestroyDSetLayouts(this);
+	//m_surfaceAnalysisPipeline.DestroyDSetLayouts(this);//Assembly shares analysis Layouts and more, therefor only assembly should be destroyed
 	m_surfaceAssemblyPipeline.DestroyDSetLayouts(this);
 	if (m_surfaceAnalysisPipeline.m_descriptorSetLayouts.size() != 0)
 	if (m_formDSetLayout)
@@ -676,6 +710,24 @@ void Engine::ReleaseStagingResources()
 
 	vkDestroyDescriptorPool(m_instance.device, m_stagingDescriptorPool, nullptr);
 	SAFE_DEL(m_stagingResources);
+
+	VkFence* fences = m_queues[0].m_fences;
+
+	for (int i = 0; i < m_queueCount * Engine::WORKER_CMDB_COUNT; i++)
+		vkDestroyFence(m_instance.device, fences[i], nullptr);
+	for (int i = 0; i < m_workerCount; i++)
+	{
+		WorkerResource& wr = m_workers[i];
+		vkDestroyCommandPool(m_instance.device, wr.m_computeCMDPool, nullptr);
+		vkDestroyCommandPool(m_instance.device, wr.m_queryCMDPool, nullptr);
+		vkDestroyEvent(m_instance.device, wr.m_queryEvent, nullptr);
+		vkDestroyFence(m_instance.device, wr.m_queryFence, nullptr);
+	}
+
+	delete[] fences;
+
+	delete[] m_workers;
+	delete[] m_queues;
 }
 
 
@@ -747,9 +799,14 @@ EXPORT uint8_t GetQueueCount(Engine* instance)
 	return instance->GetQueueCount();
 }
 
-EXPORT void SubmitRender(Engine* instance)
+EXPORT void QueryOcclusion(Engine* instance, Camera* camera, uint8_t workerIndex)
 {
-	instance->SubmitRender();
+	instance->QueryOcclusion(camera, workerIndex);
+}
+
+EXPORT void ClearRender(Engine* instance)
+{
+	instance->ClearRender();
 }
 
 EXPORT void SubmitQueue(Engine* instance, uint8_t queueIndex)
@@ -769,16 +826,15 @@ EXPORT ComputePipeline* CreateFormPipeline(Engine* instance, char* formShader, i
 	return instance->CreateFormPipeline(shader);
 }
 
+EXPORT void ReleaseHandle(Engine* instance, GPUResourceHandle*& resourceHandle)
+{
+	instance->DestroyResource(resourceHandle);
+}
+
 EXPORT void Release(Engine* instance, GPUResource*& resource)
 {
 	SAFE_DEL_DEALLOC(resource, instance);
 }
-
-/*
-EXPORT void ComputeTest(Engine* instance, ComputePipeline* compute)
-{
-	instance->ComputeTest(compute);
-}*/
 
 EXPORT void InitializeVoxulkanInstance(Engine* instance)
 {
@@ -801,241 +857,3 @@ extern "C" UnityRenderingEventAndData UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API
 	return OnRenderEvent;
 }
 #pragma endregion
-/*
-void Engine::ComputeTest(ComputePipeline* form)
-{
-	uint16_t stageIndex = m_stagingResources->dequeue();
-	if (stageIndex == POOL_QUEUE_END)
-		return;
-	ChunkStagingResources* stage = (*m_stagingResources)[stageIndex];
-	const uint8_t workerIndex = 0;
-	WorkerResource* wr = m_workers + workerIndex;
-	QueueResource* qr = m_queues + wr->m_queueIndex;
-
-	VkCommandBufferBeginInfo beginI = {};
-	beginI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-	beginI.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-	VkCommandBufferInheritanceInfo inheretInfo = {};
-	inheretInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
-	beginI.pInheritanceInfo = &inheretInfo;
-	VK_CALL(vkBeginCommandBuffer(wr->m_CMDB, &beginI));
-
-	std::vector<VkImageMemoryBarrier> imageMemBs(2);
-	imageMemBs[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-	imageMemBs[0].image = stage->m_colorMap.m_gpuHandle->m_image;
-	imageMemBs[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	imageMemBs[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	imageMemBs[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-	imageMemBs[0].dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-	imageMemBs[0].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-	imageMemBs[0].newLayout = VK_IMAGE_LAYOUT_GENERAL;
-	imageMemBs[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	imageMemBs[0].subresourceRange.baseArrayLayer = 0;
-	imageMemBs[0].subresourceRange.baseMipLevel = 0;
-	imageMemBs[0].subresourceRange.layerCount = 1;
-	imageMemBs[0].subresourceRange.levelCount = 1;
-	vkCmdPipelineBarrier(wr->m_CMDB, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		0,
-		0, nullptr,
-		0, nullptr,
-		1, &imageMemBs[0]);
-
-	VkPipeline formPipeline;
-	VkPipelineLayout formLayout;
-	form->GetVkPipeline(formPipeline, formLayout);
-	vkCmdBindDescriptorSets(wr->m_CMDB, VK_PIPELINE_BIND_POINT_COMPUTE, formLayout, 0, 1, &stage->m_formDSet, 0, nullptr);
-	vkCmdBindPipeline(wr->m_CMDB, VK_PIPELINE_BIND_POINT_COMPUTE, formPipeline);
-	uint32_t sd4 = 36 / 4;
-	vkCmdDispatch(wr->m_CMDB, sd4, sd4, sd4);
-
-	std::vector<VkBufferMemoryBarrier> bufferMemBs(2);
-	bufferMemBs[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-	bufferMemBs[0].buffer = stage->m_attributes.m_gpuHandle->m_buffer;
-	bufferMemBs[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	bufferMemBs[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	bufferMemBs[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-	bufferMemBs[0].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-	bufferMemBs[0].offset = 0;
-	bufferMemBs[0].size = VK_WHOLE_SIZE;
-	vkCmdPipelineBarrier(wr->m_CMDB, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-		0,
-		0, nullptr,
-		1, &bufferMemBs[0],
-		0, nullptr);
-	vkCmdFillBuffer(wr->m_CMDB, bufferMemBs[0].buffer, 0, VK_WHOLE_SIZE, 0);
-	bufferMemBs[0].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-	bufferMemBs[0].dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-	vkCmdPipelineBarrier(wr->m_CMDB, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		0,
-		0, nullptr,
-		1, &bufferMemBs[0],
-		0, nullptr);
-
-	bufferMemBs[1] = bufferMemBs[0];
-	bufferMemBs[1].buffer = stage->m_cells.m_gpuHandle->m_buffer;
-	bufferMemBs[1].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-	bufferMemBs[1].dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-
-	imageMemBs[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-	imageMemBs[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-	imageMemBs[1] = imageMemBs[0];
-	imageMemBs[1].image = stage->m_indexMap.m_gpuHandle->m_image;
-	imageMemBs[1].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-	imageMemBs[1].dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-	vkCmdPipelineBarrier(wr->m_CMDB, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		0,
-		0, nullptr,
-		1, &bufferMemBs[1],
-		2, imageMemBs.data());
-
-	VkPipeline analysisPipeline;
-	VkPipelineLayout analysisPipelineLayout;
-	m_surfaceAnalysisPipeline.GetVkPipeline(analysisPipeline, analysisPipelineLayout);
-	vkCmdBindDescriptorSets(wr->m_CMDB, VK_PIPELINE_BIND_POINT_COMPUTE, analysisPipelineLayout, 0, 1, &stage->m_analysisDSet, 0, nullptr);
-	vkCmdBindPipeline(wr->m_CMDB, VK_PIPELINE_BIND_POINT_COMPUTE, analysisPipeline);
-	SurfaceAnalysisConstants surfConsts = {};
-	surfConsts.base = glm::uvec3(2, 2, 2);
-	surfConsts.range = glm::uvec3(31, 31, 31);
-	vkCmdPushConstants(wr->m_CMDB, analysisPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(SurfaceAnalysisConstants), &surfConsts);
-	glm::uvec3 dispRange((uint32_t)std::ceilf((surfConsts.range.x + 1) / 4.0f), (uint32_t)std::ceilf((surfConsts.range.y + 1) / 4.0f), (uint32_t)std::ceilf((surfConsts.range.z + 1) / 4.0f));
-	vkCmdDispatch(wr->m_CMDB, dispRange.x, dispRange.y, dispRange.z);
-
-	bufferMemBs[1].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-	bufferMemBs[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-	imageMemBs[1].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-	imageMemBs[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-	vkCmdPipelineBarrier(wr->m_CMDB, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		0,
-		0, nullptr,
-		1, &bufferMemBs[1],
-		1, &imageMemBs[1]);
-
-	bufferMemBs[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-	bufferMemBs[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-	bufferMemBs[1].buffer = stage->m_attributesSB.m_gpuHandle->m_buffer;
-	bufferMemBs[1].srcAccessMask = 0;
-	bufferMemBs[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-
-	vkCmdPipelineBarrier(wr->m_CMDB, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-		0,
-		0, nullptr,
-		2, bufferMemBs.data(),
-		0, nullptr);
-	VkBufferCopy attribCopy = {};
-	attribCopy.size = sizeof(SurfaceAttributes);
-	attribCopy.dstOffset = 0;
-	attribCopy.srcOffset = 0;
-
-	vkCmdCopyBuffer(wr->m_CMDB, stage->m_attributes.m_gpuHandle->m_buffer, stage->m_attributesSB.m_gpuHandle->m_buffer, 1, &attribCopy);
-
-	bufferMemBs[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-	bufferMemBs[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-	bufferMemBs[1].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-	bufferMemBs[1].dstAccessMask = VK_ACCESS_HOST_READ_BIT;
-	vkCmdPipelineBarrier(wr->m_CMDB, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		0,
-		0, nullptr,
-		1, &bufferMemBs[0],
-		0, nullptr);
-	vkCmdPipelineBarrier(wr->m_CMDB, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
-		0,
-		0, nullptr,
-		1, &bufferMemBs[1],
-		0, nullptr);
-
-	VK_CALL(vkEndCommandBuffer(wr->m_CMDB));
-
-	VkSubmitInfo subI = {};
-	subI.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-	subI.commandBufferCount = 1;
-	subI.pCommandBuffers = &wr->m_CMDB;
-	vkQueueSubmit(qr->m_queue, 1, &subI, nullptr);
-	vkQueueWaitIdle(qr->m_queue);
-
-	void* attribData;
-	vmaMapMemory(m_allocator, stage->m_attributesSB.m_gpuHandle->m_allocation, &attribData);
-	SurfaceAttributes surfaceAttribs = {};
-	std::memcpy(&surfaceAttribs, attribData, sizeof(SurfaceAttributes));
-	vmaUnmapMemory(m_allocator, stage->m_attributesSB.m_gpuHandle->m_allocation);
-
-	if (surfaceAttribs.cellCount > 0)
-	{
-		stage->m_verticies.Dereference();
-		stage->m_verticies.m_byteCount = surfaceAttribs.vertexCount * 16LL;
-		stage->m_verticies.Allocate(this);
-
-		stage->m_indicies.Dereference();
-		stage->m_indicies.m_byteCount = surfaceAttribs.indexCount * 4LL;
-		stage->m_indicies.Allocate(this);
-
-		VkDescriptorBufferInfo vertBI = { stage->m_verticies.m_gpuHandle->m_buffer, 0, VK_WHOLE_SIZE };
-		VkDescriptorBufferInfo idxsBI = { stage->m_indicies.m_gpuHandle->m_buffer, 0, VK_WHOLE_SIZE };
-
-		std::vector<VkWriteDescriptorSet> descWrites(2);
-		descWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		descWrites[0].descriptorCount = 1;
-		descWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-		descWrites[0].dstArrayElement = 0;
-		descWrites[0].dstBinding = 3;
-		descWrites[0].dstSet = stage->m_assemblyDSet;
-		descWrites[0].pBufferInfo = &vertBI;
-		descWrites[1] = descWrites[0];
-		descWrites[1].dstBinding = 4;
-		descWrites[1].pBufferInfo = &idxsBI;
-		vkUpdateDescriptorSets(m_instance.device, 2, descWrites.data(), 0, nullptr);
-
-		VK_CALL(vkBeginCommandBuffer(wr->m_CMDB, &beginI));
-		bufferMemBs[0].buffer = stage->m_verticies.m_gpuHandle->m_buffer;
-		bufferMemBs[0].srcAccessMask = 0;
-		bufferMemBs[0].dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-		bufferMemBs[1].buffer = stage->m_indicies.m_gpuHandle->m_buffer;
-		bufferMemBs[1].srcAccessMask = 0;
-		bufferMemBs[1].dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-		vkCmdPipelineBarrier(wr->m_CMDB, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-			0,
-			0, nullptr,
-			2, bufferMemBs.data(),
-			0, nullptr);
-
-		VkPipeline assemblyPipeline;
-		VkPipelineLayout assemblyPipelineLayout;
-		m_surfaceAssemblyPipeline.GetVkPipeline(assemblyPipeline, assemblyPipelineLayout);
-		vkCmdBindDescriptorSets(wr->m_CMDB, VK_PIPELINE_BIND_POINT_COMPUTE, assemblyPipelineLayout, 0, 1, &stage->m_assemblyDSet, 0, nullptr);
-		vkCmdBindPipeline(wr->m_CMDB, VK_PIPELINE_BIND_POINT_COMPUTE, assemblyPipeline);
-		SurfaceAssemblyConstants surfAssemblyConsts = {};
-		surfAssemblyConsts.base = glm::uvec3(2, 2, 2);
-		surfAssemblyConsts.offset = glm::vec3(-16.0f, -16.0f, -16.0f);
-		surfAssemblyConsts.scale = {1.0f,1.0f,1.0f};
-		vkCmdPushConstants(wr->m_CMDB, assemblyPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(SurfaceAssemblyConstants), &surfAssemblyConsts);
-		vkCmdDispatch(wr->m_CMDB, (uint32_t)std::ceilf(surfaceAttribs.cellCount / 64.0f), 1, 1);
-
-		bufferMemBs[0].srcQueueFamilyIndex = m_computeQueueFamily;
-		bufferMemBs[0].dstQueueFamilyIndex = m_instance.queueFamilyIndex;
-		bufferMemBs[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-		bufferMemBs[0].dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
-		bufferMemBs[1].srcQueueFamilyIndex = m_computeQueueFamily;
-		bufferMemBs[1].dstQueueFamilyIndex = m_instance.queueFamilyIndex;
-		bufferMemBs[1].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-		bufferMemBs[1].dstAccessMask = VK_ACCESS_INDEX_READ_BIT;
-		vkCmdPipelineBarrier(wr->m_CMDB, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
-			0,
-			0, nullptr,
-			2, bufferMemBs.data(),
-			0, nullptr);
-		VK_CALL(vkEndCommandBuffer(wr->m_CMDB));
-
-		vkQueueSubmit(qr->m_queue, 1, &subI, nullptr);
-		vkQueueWaitIdle(qr->m_queue);
-
-		LOG("MESH GENERATED!");
-		m_testMutex.lock();
-		m_vertexBuffer.Release(this);
-		m_indexBuffer.Release(this);
-		m_vertexBuffer = stage->m_verticies;
-		m_indexBuffer = stage->m_indicies;
-		m_vertexCount = surfaceAttribs.vertexCount;
-		m_indexCount = surfaceAttribs.indexCount;
-		m_testMutex.unlock();
-	}
-	m_stagingResources->enqueue(stageIndex);
-}*/

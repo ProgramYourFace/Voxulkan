@@ -15,11 +15,11 @@ public class SpaceCamera : MonoBehaviour
 
     void Awake()
     {
-        Cursor.visible = false;
-        Cursor.lockState = CursorLockMode.Locked;
+        Cursor.visible = true;
+        Cursor.lockState = CursorLockMode.None;
     }
 
-    void LateUpdate()
+    void Update()
     {
         if (Input.GetKeyDown(KeyCode.Escape))
         {
@@ -53,7 +53,6 @@ public class SpaceCamera : MonoBehaviour
 
         transform.position += (transform.forward * input.z + transform.right * input.x + orient * Vector3.up * input.y) *
             movementSpeed * (Input.GetKey(KeyCode.LeftShift) ? shiftMult : 1.0f) * Time.deltaTime;
-
 
         if (input.sqrMagnitude > 0.000001f || Mathf.Abs(roll) > 0.00001f)
             ApplyToOrient();

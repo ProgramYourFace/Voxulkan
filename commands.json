@@ -1,0 +1,9 @@
+{
+  "commands": {
+    "BuildShaders": {
+      "fileName": "cmd.exe",
+      "workingDirectory": ".",
+      "arguments": "/c BuildShaders.bat"
+    }
+  }
+}

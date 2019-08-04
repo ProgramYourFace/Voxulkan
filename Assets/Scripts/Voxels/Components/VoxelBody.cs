@@ -5,8 +5,12 @@ using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using UnityEngine;
 
-public struct VoxelBody : IComponentData
+namespace Voxulkan
 {
-    [NativeDisableUnsafePtrRestriction]
-    public IntPtr m_nativeBody;
+    public struct VoxelBody : IComponentData
+    {
+        [NativeDisableUnsafePtrRestriction]
+        public IntPtr m_nativeBody;
+        public bool m_destroy;
+    }
 }

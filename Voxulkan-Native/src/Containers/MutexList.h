@@ -19,7 +19,7 @@ public:
 		cond{}
 	{}
 
-	void erase()
+	void clear()
 	{
 		std::lock_guard<std::mutex> lock(mut);
 		vec.clear();
@@ -49,7 +49,21 @@ public:
 		vec.push_back(std::move(in));
 		cond.notify_one();
 	}
-	T& operator[](const int index)
+	T& emplace_back()
+	{
+		std::lock_guard<std::mutex> lock(mut);
+		T& r = vec.emplace_back();
+		cond.notify_one();
+		return r;
+	}
+
+	std::vector<T>& vector() { return vec; }
+
+	void lock() { mut.lock(); }
+	void unlock() { mut.unlock(); }
+
+	size_t size() { return vec.size(); }
+	T& operator[](size_t index)
 	{
 		return vec[index];
 	}

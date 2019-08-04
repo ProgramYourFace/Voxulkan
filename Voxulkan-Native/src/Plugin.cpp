@@ -48,11 +48,12 @@ static IUnityGraphicsVulkan* s_Vulkan = NULL;
 static Engine* s_Engine;
 static uint32_t s_ComputeFamilyIndex;
 static std::vector<VkQueue> s_ComputeQueues;
+static VkQueue s_OcclusionQueue;
 
 EXPORT void CreateVoxulkanInstance(Engine*& instance)
 {
 	instance = new Engine(s_Vulkan);
-	instance->RegisterComputeQueues(s_ComputeQueues, s_ComputeFamilyIndex);
+	instance->RegisterQueues(s_ComputeQueues, s_ComputeFamilyIndex, s_OcclusionQueue);
 }
 EXPORT void DestroyVoxulkanInstance(Engine*& instance)
 {
@@ -117,8 +118,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_vkCreateDevice(VkPhysicalDevice physi
 	{
 		LOG("Something strange is happening with unity queues!");
 	}
-
+	float uPriorities[2]{ 1.0, queuePriority };
 	VkDeviceQueueCreateInfo uQueueInfo = pCreateInfo->pQueueCreateInfos[0];
+	uQueueInfo.queueCount = 2;
+	uQueueInfo.pQueuePriorities = uPriorities;
 	s_ComputeFamilyIndex = queueFamilyCount;
 	uint32_t cuQueueCount = 0;
 	bool hasComputeOnly = false;
@@ -203,12 +206,19 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_vkCreateDevice(VkPhysicalDevice physi
 	newCInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
 	newCInfo.pQueueCreateInfos = queueCreateInfos.data();
 
+	std::vector<const char*> extensions(newCInfo.ppEnabledExtensionNames, newCInfo.ppEnabledExtensionNames + newCInfo.enabledExtensionCount);
+	extensions.push_back(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
+
+	newCInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
+	newCInfo.ppEnabledExtensionNames = extensions.data();
+
 	VkResult result = vkCreateDevice(physicalDevice, &newCInfo, pAllocator, pDevice);
 	if (result != VK_SUCCESS)
 		LOG("Device creation failed!");
 
 	SAFE_DEL_ARR(priorities);
 	
+	vkGetDeviceQueue(*pDevice, uQueueInfo.queueFamilyIndex, 1, &s_OcclusionQueue);
 	s_ComputeQueues = std::vector<VkQueue>(queueCount);
 	for (uint32_t i = 0; i < queueCount; i++)
 	{
@@ -217,35 +227,20 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_vkCreateDevice(VkPhysicalDevice physi
 	return result;
 }
 
-#ifdef _DEBUG
+PFN_vkCmdPushDescriptorSetKHR vkCmdPushDescriptorSet = nullptr;
+
 static VKAPI_ATTR VkResult VKAPI_CALL Hook_vkCreateInstance(const VkInstanceCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkInstance* pInstance)
 {
 	VkInstanceCreateInfo newCInfo = *pCreateInfo;
 
-	std::vector<const char*> extensions(pCreateInfo->enabledExtensionCount);
-	bool hasDebug = false;
-	for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; i++)
-	{
-		extensions[i] = pCreateInfo->ppEnabledExtensionNames[i];
-		if (strcmp(pCreateInfo->ppEnabledExtensionNames[i], VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0)
-			hasDebug = true;
-	}
-	if (!hasDebug)
-		extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	std::vector<const char*> extensions(newCInfo.ppEnabledExtensionNames, newCInfo.ppEnabledExtensionNames + newCInfo.enabledExtensionCount);
+	std::vector<const char*> layers(pCreateInfo->ppEnabledLayerNames, pCreateInfo->ppEnabledLayerNames + pCreateInfo->enabledLayerCount);
 
-
-#define VK_LAYER_VALIDATION "VK_LAYER_KHRONOS_validation"
-
-	std::vector<const char*> layers(pCreateInfo->enabledLayerCount);
-	hasDebug = false;
-	for (uint32_t i = 0; i < pCreateInfo->enabledLayerCount; i++)
-	{
-		layers[i] = pCreateInfo->ppEnabledLayerNames[i];
-		if (strcmp(pCreateInfo->ppEnabledLayerNames[i], VK_LAYER_VALIDATION) == 0)
-			hasDebug = true;
-	}
-	if (!hasDebug)
-		layers.push_back(VK_LAYER_VALIDATION);
+	extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+#ifdef _DEBUG
+	extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+	layers.push_back("VK_LAYER_KHRONOS_validation");
+#endif
 
 	newCInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
 	newCInfo.ppEnabledExtensionNames = extensions.data();
@@ -256,19 +251,19 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_vkCreateInstance(const VkInstanceCrea
 	if (result != VK_SUCCESS)
 		LOG("Instance creation failed!");
 
+	vkCmdPushDescriptorSet = (PFN_vkCmdPushDescriptorSetKHR)vkGetInstanceProcAddr(*pInstance, "vkCmdPushDescriptorSetKHR");
+
 	return result;
 }
-#endif
 
-static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL Hook_vkGetInstanceProcAddr(VkInstance device, const char* funcName)
+
+static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL Hook_vkGetInstanceProcAddr(VkInstance instance, const char* funcName)
 {
 	if (!funcName)
 		return NULL;
 
 #define INTERCEPT(fn) if (strcmp(funcName, #fn) == 0) return (PFN_vkVoidFunction)&Hook_##fn
-#ifdef _DEBUG
 	INTERCEPT(vkCreateInstance);
-#endif
 	INTERCEPT(vkCreateDevice);
 #undef INTERCEPT
 
@@ -277,5 +272,6 @@ static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL Hook_vkGetInstanceProcAddr(VkIns
 
 static PFN_vkGetInstanceProcAddr UNITY_INTERFACE_API InterceptVulkanInitialization(PFN_vkGetInstanceProcAddr getInstanceProcAddr, void* userData)
 {
+
 	return Hook_vkGetInstanceProcAddr;
 }

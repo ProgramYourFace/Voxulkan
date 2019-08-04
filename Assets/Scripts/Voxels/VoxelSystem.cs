@@ -1,38 +1,98 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Jobs;
+using Unity.Jobs.LowLevel.Unsafe;
 using UnityEngine;
 
 namespace Voxulkan
 {
-    public class VoxelSystem : ComponentSystem
+    public class VoxelCMDBSystem : EntityCommandBufferSystem { }
+
+    [UpdateAfter(typeof(NativeSystem))]
+    public class VoxelSystem : JobComponentSystem
     {
-        struct VoxelBodyTraverseJob : IJobForEach<VoxelBody>
+        struct VoxelBodyTraverseJob : IJobParallelFor
         {
             [NativeDisableUnsafePtrRestriction]
-            public IntPtr m_instance;
-            [NativeDisableUnsafePtrRestriction]
-            public IntPtr m_form;
-            public Vector3 m_observerPosition;
+            [ReadOnly] public IntPtr m_instance;
+            [ReadOnly] public Vector3 m_observerPosition;
+            [ReadOnly] public float m_errorThreshold;
+            public EntityCommandBuffer.Concurrent m_cmdb;
+
+            [NativeDisableParallelForRestriction]
+            [DeallocateOnJobCompletion]
+            public NativeArray<Entity> m_entities;
+            [NativeDisableParallelForRestriction]
+            public ComponentDataFromEntity<VoxelBody> m_voxelBodies;
+            [NativeDisableParallelForRestriction]
+            public BufferFromEntity<BodyForm> m_formsBuffers;
 
             [NativeSetThreadIndex]
             int m_ThreadIndex;
 
-            public void Execute(ref VoxelBody vb)
+            public void Execute(int index)
             {
-                Native.VBTraverse(m_instance, vb.m_nativeBody, (byte)m_ThreadIndex, m_observerPosition, 10.0f, 32.0f, m_form);
+                Entity entity = m_entities[index];
+                VoxelBody vb = m_voxelBodies[entity];
+                if (vb.m_destroy)
+                {
+                    Native.DestroyVoxelBody(m_instance, vb.m_nativeBody);
+                    vb.m_nativeBody = IntPtr.Zero;
+                    m_cmdb.DestroyEntity(index, entity);
+                }
+                else
+                {
+                    m_ThreadIndex--;
+                    if (m_ThreadIndex >= Environment.ProcessorCount || m_ThreadIndex < 0)
+                    {
+                        Debug.Log("Thread out of range: " + m_ThreadIndex);
+                        return;
+                    }
+                    DynamicBuffer<BodyForm> forms = m_formsBuffers[entity];
+                    if (forms.Length == 0)
+                        return;
+                    unsafe
+                    {
+                        Native.VBTraverse(m_instance,
+                            vb.m_nativeBody,
+                            (byte)m_ThreadIndex,
+                            m_observerPosition,
+                            m_errorThreshold,
+                            1.0f,
+                            forms.GetUnsafePtr(),
+                            (uint)forms.Length,
+                            10);
+                    }
+                }
             }
         }
-        struct SubmitRenderJob : IJob
+        struct OcclusionQueryJob : IJobParallelFor
+        {
+            [NativeDisableUnsafePtrRestriction]
+            public IntPtr m_instance;
+            [NativeDisableParallelForRestriction]
+            [DeallocateOnJobCompletion]
+            public NativeArray<NativeCameraComponent> m_cameras;
+
+            [NativeSetThreadIndex]
+            int m_ThreadIndex;
+
+            public void Execute(int index)
+            {
+                Native.QueryOcclusion(m_instance, m_cameras[index].cameraHandle, (byte)m_ThreadIndex);
+            }
+        }
+        struct ClearRenderJob : IJob
         {
             [NativeDisableUnsafePtrRestriction]
             public IntPtr m_instance;
             public void Execute()
             {
-                Native.SubmitRender(m_instance);
+                Native.ClearRender(m_instance);
             }
         }
         struct SubmitQueuesJob : IJobParallelFor
@@ -45,45 +105,118 @@ namespace Voxulkan
             }
         }
 
-        NativeSystem m_nativeSystem;
+        public float m_LODThreshold = 100.0f;
+
+        NativeSystem m_nativeSystem = null;
         IntPtr m_sphereForm;
 
-        IntPtr m_testVB;
-        JobHandle m_jobs = default;
+        VoxelCMDBSystem m_cmdbSystem = null;
+        JobHandle m_updateJob;
 
         public void OnNativeInitialized(NativeSystem nativeSystem)
         {
+            m_cmdbSystem = World.GetOrCreateSystem<VoxelCMDBSystem>();
             m_nativeSystem = nativeSystem;
             byte[] sphereFormShader = Native.LoadShaderBytes("SphereForm.comp");
             m_sphereForm = Native.CreateFormPipeline(m_nativeSystem.NativeInstance, sphereFormShader, sphereFormShader.Length);
 
-            m_testVB = Native.CreateVoxelBody(Vector3.one * -128.0f, Vector3.one * 128.0f);
-            Entity e = EntityManager.CreateEntity(typeof(VoxelBody));
-            EntityManager.SetComponentData(e, new VoxelBody() { m_nativeBody = m_testVB });
+            BodyForm[] forms = new BodyForm[1];
+            forms[0].formCompute = m_sphereForm;
+            forms[0].min = -Vector3.one * -900;
+            forms[0].max = Vector3.one * 900;
+            CreateVoxelBody(Vector3.one * -900, Vector3.one * 900, Vector3.forward * 1000.0f, Quaternion.Euler(50, 12, 42), forms);
+            CreateVoxelBody(Vector3.one * -900, Vector3.one * 900, Vector3.back * 1000.0f, Quaternion.Euler(-25, 25, 10), forms);
+            CreateVoxelBody(Vector3.one * -900, Vector3.one * 900, Vector3.left * 1000.0f, Quaternion.Euler(50, 12, 42), forms);
+            CreateVoxelBody(Vector3.one * -900, Vector3.one * 900, Vector3.right * 1000.0f, Quaternion.Euler(-25, 25, 10), forms);
         }
 
-        protected override void OnUpdate()
+        public Entity CreateVoxelBody(Vector3 min, Vector3 max, Vector3 position, Quaternion rotation, BodyForm[] forms = null)
         {
-            IntPtr instance = m_nativeSystem.NativeInstance;
-            if (m_jobs.IsCompleted && instance != IntPtr.Zero)
+            Entity entity = EntityManager.CreateEntity(typeof(VoxelBody), typeof(BodyForm));
+            if (forms != null)
             {
-                JobHandle traverseJob = new VoxelBodyTraverseJob() {
-                    m_instance = instance,
-                    m_form = m_sphereForm,
-                    m_observerPosition = Camera.main.transform.position
-                }.Schedule(this, m_jobs);
-
-                JobHandle rJob = new SubmitRenderJob() { m_instance = instance }.Schedule(traverseJob);
-                JobHandle qJob = new SubmitQueuesJob() { m_instance = instance }.Schedule(m_nativeSystem.QueueCount, 1, traverseJob);
-                m_jobs = JobHandle.CombineDependencies(rJob, qJob);
+                DynamicBuffer<BodyForm> bForms = EntityManager.GetBuffer<BodyForm>(entity);
+                for (int i = 0; i < forms.Length; i++)
+                    bForms.Add(forms[i]);
             }
+            VoxelBody vb = new VoxelBody();
+            vb.m_nativeBody = Native.CreateVoxelBody(min, max);
+            Native.SetVoxelBodyTransform(vb.m_nativeBody, Matrix4x4.TRS(position, rotation, Vector3.one));
+            vb.m_destroy = false;
+            EntityManager.SetComponentData(entity, vb);
+            return entity;
         }
 
-        internal void OnNativeDeinitialized()
+        public void DeleteVoxelBody(Entity body)
         {
-            m_jobs.Complete();
-            Native.DestroyVoxelBody(m_nativeSystem.NativeInstance, ref m_testVB);
+            VoxelBody vb = EntityManager.GetComponentData<VoxelBody>(body);
+            vb.m_destroy = true;
+            EntityManager.SetComponentData(body, vb);
+        }
+
+        protected override JobHandle OnUpdate(JobHandle inputDeps)
+        {
+            if (m_nativeSystem == null)
+                return inputDeps;
+
+            EntityQuery vbQuery = World.Active.EntityManager.CreateEntityQuery(typeof(VoxelBody), typeof(BodyForm));
+
+            IntPtr instance = m_nativeSystem.NativeInstance;
+            JobHandle queryJob;
+            JobHandle traverseJob = new VoxelBodyTraverseJob()
+            {
+                m_instance = instance,
+                m_observerPosition = Camera.main.transform.position,
+                m_errorThreshold = m_LODThreshold,
+                m_cmdb = m_cmdbSystem.CreateCommandBuffer().ToConcurrent(),
+                m_entities = vbQuery.ToEntityArray(Allocator.TempJob, out queryJob),
+                m_voxelBodies = GetComponentDataFromEntity<VoxelBody>(false),//TODO: See about making read only
+                m_formsBuffers = GetBufferFromEntity<BodyForm>(false)
+            }.Schedule(vbQuery.CalculateLength(), 1, JobHandle.CombineDependencies(inputDeps, queryJob));
+
+            m_cmdbSystem.AddJobHandleForProducer(traverseJob);
+
+            EntityQuery cameraQuery = World.Active.EntityManager.CreateEntityQuery(typeof(NativeCameraComponent));
+
+            
+            JobHandle occlusionQueryJob = new OcclusionQueryJob()
+            {
+                m_instance = instance,
+                m_cameras = cameraQuery.ToComponentDataArray<NativeCameraComponent>(Allocator.TempJob, out queryJob)
+            }.Schedule(cameraQuery.CalculateLength(), 1, JobHandle.CombineDependencies(traverseJob, queryJob/*, m_nativeSystem.GCJob*/));
+            
+            JobHandle submitQueueJob = new SubmitQueuesJob()
+            {
+                m_instance = instance
+            }.Schedule(m_nativeSystem.QueueCount, 1, traverseJob);
+
+            m_updateJob = new ClearRenderJob()
+            {
+                m_instance = instance
+            }.Schedule(JobHandle.CombineDependencies(occlusionQueryJob, submitQueueJob));
+
+            vbQuery.Dispose();
+            cameraQuery.Dispose();
+
+            return m_updateJob;
+        }
+        public void OnNativeDeinitialized()
+        {
+            DeleteAllVoxelBodies();
             Native.Release(m_nativeSystem.NativeInstance, ref m_sphereForm);
+            m_nativeSystem = null;
+        }
+        public void DeleteAllVoxelBodies()
+        {
+            m_updateJob.Complete();
+            EntityQuery eq = World.Active.EntityManager.CreateEntityQuery(typeof(VoxelBody));
+            NativeArray<VoxelBody> vbs = eq.ToComponentDataArray<VoxelBody>(Allocator.TempJob);
+            for (int i = 0; i < vbs.Length; i++)
+            {
+                Native.DestroyVoxelBody(m_nativeSystem.NativeInstance, vbs[i].m_nativeBody);
+            }
+            vbs.Dispose();
+            eq.Dispose();
         }
     }
 }

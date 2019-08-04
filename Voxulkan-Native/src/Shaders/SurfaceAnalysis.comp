@@ -6,11 +6,19 @@ layout(set = 0, binding = 2) buffer restrict writeonly cellBuffer
 {
 	uvec2 cells[];
 };
-layout(set = 0, binding = 3) buffer restrict writeonly attributes
+layout(set = 0, binding = 3) buffer restrict writeonly info
 {
 	uint cellCount;
 	uint vertexCount;
 	uint indexCount;
+
+	uint maxx;
+	uint maxy;
+	uint maxz;
+
+	uint minx;
+	uint miny;
+	uint minz;
 };
 
 layout(push_constant) uniform PushConstants
@@ -109,6 +117,14 @@ void main()
 
 	if(cubeFlag != 0 && cubeFlag != 0xFF)
 	{
+		atomicMin(minx, gl_GlobalInvocationID.x);
+		atomicMin(miny, gl_GlobalInvocationID.y);
+		atomicMin(minz, gl_GlobalInvocationID.z);
+
+		atomicMax(maxx, gl_GlobalInvocationID.x);
+		atomicMax(maxy, gl_GlobalInvocationID.y);
+		atomicMax(maxz, gl_GlobalInvocationID.z);
+
 		uint idx = 0xFFFFFFFF;
 		uint vCount = vertCounts[cubeFlag];
 		if(gl_GlobalInvocationID.x == viewRange.x || 
@@ -126,13 +142,10 @@ void main()
 			(gl_GlobalInvocationID.z << 16) |
 			(cubeFlag << 24), idx);
 
-		if(vCount > 0)
-		{
 		imageStore(indexMap,
 			ivec3(gl_GlobalInvocationID.xyz),
 			uvec4(
 			(atomicAdd(vertexCount, vCount) << 3) |
 			cornerFlags[cubeFlag], 0, 0, 0));
-		}
 	}
 }

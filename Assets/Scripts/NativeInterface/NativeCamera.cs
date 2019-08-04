@@ -8,18 +8,26 @@ using Unity.Entities;
 
 namespace Voxulkan
 {
+    public struct NativeCameraComponent : IComponentData
+    {
+        public IntPtr cameraHandle;
+    }
+
     [RequireComponent(typeof(Camera))]
     public class NativeCamera : MonoBehaviour
     {
         public float tessellationFactor = 1.0f;
+        public float LODThreshold = 100.0f;
 
-        IntPtr nativeCamera;
+        IntPtr handle;
+        Entity entity;
+
         new Camera camera;
         CommandBuffer commandBuffer;
         const CameraEvent NATIVE_INJECTION_POINT = CameraEvent.BeforeForwardOpaque;
 
         [StructLayout(LayoutKind.Sequential)]
-        struct CameraConstants
+        struct CameraView
         {
             public Matrix4x4 viewProjection;
             public Vector3 cameraPos;
@@ -29,11 +37,9 @@ namespace Voxulkan
         [DllImport(Native.DLL)]
         static extern IntPtr GetRenderInjection();
         [DllImport(Native.DLL)]
-        static extern IntPtr CreateNativeCamera(IntPtr instance);
+        static extern IntPtr CreateCameraHandle(IntPtr instance);
         [DllImport(Native.DLL)]
-        static extern void DestroyNativeCamera(IntPtr camera);
-        [DllImport(Native.DLL)]
-        static extern void SetCameraVP(IntPtr camera, CameraConstants constants);
+        static extern void SetCameraView(IntPtr camera, CameraView constants);
 
         void Awake()
         {
@@ -41,26 +47,36 @@ namespace Voxulkan
             camera.allowMSAA = false;
             commandBuffer = new CommandBuffer();
             commandBuffer.name = "NativeSceneInjection";
-            nativeCamera = CreateNativeCamera(NativeSystem.Active.NativeInstance);
-            commandBuffer.IssuePluginEventAndData(GetRenderInjection(), 1, nativeCamera);
+            handle = CreateCameraHandle(NativeSystem.Active.NativeInstance);
+            commandBuffer.IssuePluginEventAndData(GetRenderInjection(), 1, handle);
         }
 
-        void OnPreRender()
+        void LateUpdate()
         {
-            CameraConstants constants = new CameraConstants();
+            World.Active.GetOrCreateSystem<VoxelSystem>().m_LODThreshold = Mathf.Max(0.1f,LODThreshold);
+            CameraView constants = new CameraView();
             constants.viewProjection = camera.GetNativeViewProjection();
             constants.cameraPos = transform.position;
             constants.tessellationFactor = tessellationFactor;
-            SetCameraVP(nativeCamera, constants);
+            SetCameraView(handle, constants);
         }
 
         void OnEnable()
         {
+            EntityManager em = World.Active.EntityManager;
+            entity = em.CreateEntity(typeof(NativeCameraComponent));
+            em.SetComponentData(entity, new NativeCameraComponent() { cameraHandle = handle });
             camera.AddCommandBuffer(NATIVE_INJECTION_POINT, commandBuffer);
         }
 
         void OnDisable()
         {
+            if (World.Active != null)
+            {
+                EntityManager em = World.Active.EntityManager;
+                if (em != null && em.Exists(entity))
+                    em.DestroyEntity(entity);
+            }
             camera.RemoveCommandBuffer(NATIVE_INJECTION_POINT, commandBuffer);
         }
 
@@ -68,8 +84,7 @@ namespace Voxulkan
         {
             OnDisable();
             commandBuffer.Release();
-            DestroyNativeCamera(nativeCamera);
-            nativeCamera = IntPtr.Zero;
+            Native.ReleaseHandle(NativeSystem.Active.NativeInstance, ref handle);
         }
     }
 }

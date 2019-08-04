@@ -26,6 +26,7 @@
     <ClCompile Include="src\Plugin.cpp" />
     <ClCompile Include="src\Resources\ComputePipeline.cpp" />
     <ClCompile Include="src\Resources\GPUBuffer.cpp" />
+    <ClCompile Include="src\Resources\CommandBufferHandle.cpp" />
     <ClCompile Include="src\Resources\GPUImage.cpp" />
     <ClCompile Include="src\Resources\Pipeline.cpp" />
     <ClCompile Include="src\Resources\RenderPipeline.cpp" />
@@ -36,13 +37,14 @@
     <ClInclude Include="src\Camera.h" />
     <ClInclude Include="src\Components\VoxelBody.h" />
     <ClInclude Include="src\Components\VoxelChunk.h" />
-    <ClInclude Include="src\Containers\LFPoolQueue.h" />
+    <ClInclude Include="src\Containers\LFPoolStack.h" />
     <ClInclude Include="src\Containers\MutexList.h" />
     <ClInclude Include="src\Containers\MutexQueue.h" />
     <ClInclude Include="src\Engine.h" />
     <ClInclude Include="src\Plugin.h" />
     <ClInclude Include="src\Resources\ComputePipeline.h" />
     <ClInclude Include="src\Resources\GPUBuffer.h" />
+    <ClInclude Include="src\Resources\CommandBufferHandle.h" />
     <ClInclude Include="src\Resources\GPUImage.h" />
     <ClInclude Include="src\Resources\Pipeline.h" />
     <ClInclude Include="src\Resources\RenderPipeline.h" />
@@ -50,6 +52,7 @@
     <ClInclude Include="src\VMA.h" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\BuildShaders.bat" />
     <None Include="src\Shaders\Surface.frag" />
     <None Include="src\Shaders\Surface.tesc" />
     <None Include="src\Shaders\Surface.tese" />

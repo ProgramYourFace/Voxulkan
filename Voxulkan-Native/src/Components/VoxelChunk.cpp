@@ -1,6 +1,9 @@
 #include "VoxelChunk.h"
 #include "..//Engine.h"
 #include "..//Plugin.h"
+#include <algorithm>
+#include <stdlib.h>
+#include <glm/gtx/transform.hpp>
 
 VoxelChunk::VoxelChunk()
 {
@@ -10,7 +13,7 @@ VoxelChunk::VoxelChunk()
 	m_densityImage.m_viewType = VK_IMAGE_VIEW_TYPE_3D;
 	m_densityImage.m_usage = VK_IMAGE_USAGE_STORAGE_BIT;
 	m_densityImage.m_tiling = VK_IMAGE_TILING_OPTIMAL;
-	m_stagingIdx = POOL_QUEUE_END;
+	m_stagingIdx = POOL_STACK_END;
 }
 
 void VoxelChunk::SetMeshData(const GPUBuffer& vertexBuffer, const GPUBuffer& indexBuffer, uint32_t vertexCount, uint32_t indexCount)
@@ -21,29 +24,47 @@ void VoxelChunk::SetMeshData(const GPUBuffer& vertexBuffer, const GPUBuffer& ind
 	m_indexCount = indexCount;
 }
 
-void VoxelChunk::ReleaseResources(Engine* instance, bool self, bool includeSub)
+#define SAFE_TRASH(res) if(res.m_gpuHandle) trash.push_back(res.m_gpuHandle); res.m_gpuHandle=nullptr;
+
+void VoxelChunk::ReleaseResources(Engine* instance, std::vector<GPUResourceHandle*>& trash)
 {
-	if (self)
+	/*
+	m_densityImage.Release(instance);
+	m_indexBuffer.Release(instance);
+	m_vertexBuffer.Release(instance);*/
+	size_t space = trash.capacity() - trash.size();
+	if (space < 3)
+		trash.reserve(3 - space);
+
+
+	SAFE_TRASH(m_densityImage);
+	SAFE_TRASH(m_indexBuffer);
+	SAFE_TRASH(m_vertexBuffer);
+
+	m_indexCount = 0;
+	m_vertexCount = 0;
+	ReleaseStaging(instance);
+}
+
+void VoxelChunk::ReleaseStaging(Engine* instance)
+{
+	if (m_stagingIdx != POOL_STACK_END)
 	{
-		m_densityImage.Release(instance);
-		m_indexBuffer.Release(instance);
-		m_vertexBuffer.Release(instance);
-		m_indexCount = 0;
-		m_vertexCount = 0;
-		if (m_stagingIdx != POOL_QUEUE_END)
-		{
-			instance->m_stagingResources->enqueue(m_stagingIdx);
-			m_stagingIdx = POOL_QUEUE_END;
-		}
+		ChunkStagingResources* stage = (*instance->m_stagingResources)[m_stagingIdx];
+		instance->m_stagingResources->enqueue(m_stagingIdx);
+		m_stagingIdx = POOL_STACK_END;
+	}
+}
+
+void VoxelChunk::ReleaseSubResources(Engine* instance, std::vector<GPUResourceHandle*>& trash)
+{
+	for (size_t i = 0; i < m_subChunks.size(); i++)
+	{
+		m_subChunks[i].ReleaseResources(instance, trash);
+		m_subChunks[i].ReleaseSubResources(instance, trash);
 	}
 
-	if (includeSub)
-	{
-		for (size_t i = 0; i < m_subChunks.size(); i++)
-			m_subChunks[i].ReleaseResources(instance, true, true);
-
-		m_subChunks.clear();
-	}
+	m_subChunks.clear();
 }
 
 void VoxelChunk::AllocateVolume(Engine* instance, const glm::uvec3& size)
@@ -52,191 +73,232 @@ void VoxelChunk::AllocateVolume(Engine* instance, const glm::uvec3& size)
 	m_densityImage.Allocate(instance);
 }
 
-void VoxelChunk::BeginBuilding(Engine* instance, VkCommandBuffer commandBuffer, ComputePipeline* form)
+void VoxelChunk::Build(Engine* instance, VkCommandBuffer commandBuffer, float voxelSize, BodyForm* forms, uint32_t formsCount, std::vector<GPUResourceHandle*>& trash)
 {
-	m_stagingIdx = instance->m_stagingResources->dequeue();
-	if (m_stagingIdx == POOL_QUEUE_END)
+	ChunkStagingResources* staging = nullptr;
+	if (m_stagingIdx == POOL_STACK_END)
+	{
+		m_stagingIdx = instance->m_stagingResources->dequeue();
+		if (m_stagingIdx == POOL_STACK_END)
+			return;
+
+		staging = (*instance->m_stagingResources)[m_stagingIdx];
+		staging->Reset();
+	}
+	else
+	{
+		staging = (*instance->m_stagingResources)[m_stagingIdx];
+	}
+
+	if (!staging->Ready(instance, commandBuffer))
 		return;
 
-	ChunkStagingResources* stage = (*instance->m_stagingResources)[m_stagingIdx];
-	stage->CmdPrepare(commandBuffer);
-	stage->m_stage = CHUNK_STAGE_VOLUME_ANALYSIS;
-	
-	std::vector<VkImageMemoryBarrier> imageMemBs(2);
-	imageMemBs[0].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-	imageMemBs[0].image = stage->m_colorMap.m_gpuHandle->m_image;
-	imageMemBs[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	imageMemBs[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	imageMemBs[0].srcAccessMask = 0;
-	imageMemBs[0].dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-	imageMemBs[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-	imageMemBs[0].newLayout = VK_IMAGE_LAYOUT_GENERAL;
-	imageMemBs[0].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	imageMemBs[0].subresourceRange.baseArrayLayer = 0;
-	imageMemBs[0].subresourceRange.baseMipLevel = 0;
-	imageMemBs[0].subresourceRange.layerCount = 1;
-	imageMemBs[0].subresourceRange.levelCount = 1;
-
-	vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		0,
-		0, nullptr,
-		0, nullptr,
-		1, imageMemBs.data());
-
-	VkExtent3D res = stage->m_colorMap.m_size;//TODO: Correct for actual size of mesh
-	VkPipeline formPipeline;
-	VkPipelineLayout formLayout;
-	form->GetVkPipeline(formPipeline, formLayout);
-	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, formPipeline);
-	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, formLayout, 0, 1, &stage->m_formDSet, 0, nullptr);
-	vkCmdDispatch(commandBuffer,
-		(uint32_t)std::ceilf(res.width / 4.0f),
-		(uint32_t)std::ceilf(res.height / 4.0f),
-		(uint32_t)std::ceilf(res.depth / 4.0f));
-
-	imageMemBs[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-	imageMemBs[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-	imageMemBs[0].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-	imageMemBs[0].newLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-	vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		0,
-		0, nullptr,
-		0, nullptr,
-		1, imageMemBs.data());
-
-	VkPipeline analysisPipeline;
-	VkPipelineLayout analysisPipelineLayout;
-	instance->m_surfaceAnalysisPipeline.GetVkPipeline(analysisPipeline, analysisPipelineLayout);
-	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, analysisPipeline);
-	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, analysisPipelineLayout, 0, 1, &stage->m_analysisDSet, 0, nullptr);
-	SurfaceAnalysisConstants surfConsts = {};
-	surfConsts.base = glm::uvec3(Engine::CHUNK_PADDING, Engine::CHUNK_PADDING, Engine::CHUNK_PADDING);
-	surfConsts.range = glm::uvec3(Engine::CHUNK_SIZE, Engine::CHUNK_SIZE, Engine::CHUNK_SIZE);//TODO: Update to actual size of chunk
-	vkCmdPushConstants(commandBuffer, analysisPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(SurfaceAnalysisConstants), &surfConsts);
-	vkCmdDispatch(commandBuffer, 
-		(uint32_t)std::ceilf((surfConsts.range.x + 1) / 4.0f),
-		(uint32_t)std::ceilf((surfConsts.range.y + 1) / 4.0f),
-		(uint32_t)std::ceilf((surfConsts.range.z + 1) / 4.0f));
-
-	std::vector<VkBufferMemoryBarrier> bufferMemBs(2);
-	bufferMemBs[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-	bufferMemBs[0].buffer = stage->m_attributes.m_gpuHandle->m_buffer;
-	bufferMemBs[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	bufferMemBs[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	bufferMemBs[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-	bufferMemBs[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-	bufferMemBs[0].offset = 0;
-	bufferMemBs[0].size = VK_WHOLE_SIZE;
-	bufferMemBs[1] = bufferMemBs[0];
-	bufferMemBs[1].buffer = stage->m_cells.m_gpuHandle->m_buffer;
-	bufferMemBs[1].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-	bufferMemBs[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-	imageMemBs[1] = imageMemBs[0];
-	imageMemBs[1].image = stage->m_indexMap.m_gpuHandle->m_image;
-	imageMemBs[1].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-	imageMemBs[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-	vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		0,
-		0, nullptr,
-		1, &bufferMemBs[1],
-		1, &imageMemBs[1]);
-
-	bufferMemBs[1].buffer = stage->m_attributesSB.m_gpuHandle->m_buffer;
-	bufferMemBs[1].srcAccessMask = 0;
-	bufferMemBs[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-	/*imageMemBs[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-	imageMemBs[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-	imageMemBs[0].oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-	imageMemBs[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;*/
-	vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-		0,
-		0, nullptr,
-		2, bufferMemBs.data(),
-		0, nullptr);
-	VkBufferCopy attribCopy = {};
-	attribCopy.size = sizeof(SurfaceAttributes);
-	attribCopy.dstOffset = 0;
-	attribCopy.srcOffset = 0;
-	vkCmdCopyBuffer(commandBuffer, stage->m_attributes.m_gpuHandle->m_buffer, stage->m_attributesSB.m_gpuHandle->m_buffer, 1, &attribCopy);
-
-	bufferMemBs[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-	bufferMemBs[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-	bufferMemBs[1].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-	bufferMemBs[1].dstAccessMask = VK_ACCESS_HOST_READ_BIT;
-	vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		0,
-		0, nullptr,
-		2, bufferMemBs.data(),
-		0, nullptr);
-	
-	vkCmdSetEvent(commandBuffer, stage->m_analysisComplete, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
-}
-
-void VoxelChunk::ProcessBuilding(Engine* instance, VkCommandBuffer commandBuffer)
-{
 	VkDevice device = instance->Device();
-	ChunkStagingResources* stage = (*instance->m_stagingResources)[m_stagingIdx];
-
-	if (stage->m_stage == CHUNK_STAGE_VOLUME_ANALYSIS)
+	if (staging->m_stage == CHUNK_STAGE_IDLE)
 	{
-		if (vkGetEventStatus(device, stage->m_analysisComplete) == VK_EVENT_RESET)
+		staging->m_stage = CHUNK_STAGE_VOLUME_ANALYSIS;
+
+		glm::vec3 size = m_max - m_min;
+		float sMax = std::max(size.x, std::max(size.y, size.z));
+		int rMax = std::min((int)std::round(sMax / voxelSize), (int)Engine::CHUNK_SIZE);
+#define RSIZE(axis) (uint32_t)std::round(rMax * axis / sMax)
+		glm::uvec3 effectiveSize(RSIZE(size.x), RSIZE(size.y), RSIZE(size.z));
+		memcpy(&staging->m_density.m_size, &effectiveSize, sizeof(glm::uvec3));
+
+		VkImageMemoryBarrier colorMemB = {};
+		colorMemB.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		colorMemB.image = staging->m_colorMap.m_gpuHandle->m_image;
+		colorMemB.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		colorMemB.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		colorMemB.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		colorMemB.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		colorMemB.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+		colorMemB.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+		colorMemB.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		colorMemB.subresourceRange.baseArrayLayer = 0;
+		colorMemB.subresourceRange.baseMipLevel = 0;
+		colorMemB.subresourceRange.layerCount = 1;
+		colorMemB.subresourceRange.levelCount = 1;
+
+		glm::vec3 vSize = size / glm::vec3(effectiveSize);
+		glm::vec3 pMin = m_min - vSize * (float)Engine::CHUNK_PADDING;
+		glm::vec3 pMax = m_max + vSize * ((float)Engine::CHUNK_PADDING + 1.0f);
+
+		for (uint32_t i = 0; i < formsCount; i++)
+		{
+			BodyForm form = forms[i];
+			FormConstants fConsts = {};
+
+			fConsts.scale = 1.0f / (float)vSize.length();
+			if (i == 0)
+			{
+				fConsts.range = effectiveSize + glm::uvec3(1U + (uint32_t)Engine::CHUNK_PADDING * 2U);
+				fConsts.offset = { 0,0,0 };
+				fConsts.transform = glm::translate(pMin) * glm::scale(vSize);
+			}
+			else
+			{
+				glm::vec3 fMax = glm::min(pMax, form.max);
+				glm::vec3 fMin = glm::max(pMin, form.min);
+				glm::ivec3 vMin = glm::ceil((fMin - pMin - vSize * 0.5f) / vSize);
+				glm::ivec3 vMax = glm::floor((fMax - pMin + vSize * 0.5f) / vSize);
+				glm::ivec3 range = vMax - vMin;
+				if (range.x <= 0 || range.y <= 0 || range.z <= 0)
+					continue;
+
+				glm::vec3 fCenter = (form.min + form.max) * 0.5f;
+				glm::vec3 corner = (pMin + vSize * glm::vec3(vMin)) - fCenter;
+
+				fConsts.range = range;
+				fConsts.offset = vMin;
+				fConsts.transform = glm::translate(corner) * glm::scale(vSize);
+			}
+
+			VkPipeline formPipeline;
+			VkPipelineLayout formLayout;
+			form.formCompute->GetVkPipeline(formPipeline, formLayout);
+			vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, formPipeline);
+			vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, formLayout, 0, 1, &staging->m_formDSet, 0, nullptr);
+			vkCmdPushConstants(commandBuffer, formLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(FormConstants), &fConsts);
+			vkCmdDispatch(commandBuffer,
+				(uint32_t)std::ceilf(fConsts.range.x / 4.0f),
+				(uint32_t)std::ceilf(fConsts.range.y / 4.0f),
+				(uint32_t)std::ceilf(fConsts.range.z / 4.0f));
+
+			if (i < formsCount - 1)
+			{
+				vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+					0,
+					0, nullptr,
+					0, nullptr,
+					1, &colorMemB);
+			}
+		}
+
+		vkCmdFillBuffer(commandBuffer, staging->m_info.m_gpuHandle->m_buffer, 0, 24, 0);
+		vkCmdFillBuffer(commandBuffer, staging->m_info.m_gpuHandle->m_buffer, 24, 12, Engine::CHUNK_SIZE);
+
+		std::vector<VkBufferMemoryBarrier> bufferMemBs(2);
+		bufferMemBs[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+		bufferMemBs[0].buffer = staging->m_info.m_gpuHandle->m_buffer;
+		bufferMemBs[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		bufferMemBs[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		bufferMemBs[0].offset = 0;
+		bufferMemBs[0].size = VK_WHOLE_SIZE;
+		bufferMemBs[0].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		bufferMemBs[0].dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+
+		colorMemB.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			0,
+			0, nullptr,
+			1, bufferMemBs.data(),
+			1, &colorMemB);
+
+		VkPipeline analysisPipeline;
+		VkPipelineLayout analysisPipelineLayout;
+		instance->m_surfaceAnalysisPipeline.GetVkPipeline(analysisPipeline, analysisPipelineLayout);
+		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, analysisPipeline);
+		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, analysisPipelineLayout, 0, 1, &staging->m_analysisDSet, 0, nullptr);
+		SurfaceAnalysisConstants surfConsts = {};
+		surfConsts.base = glm::uvec3(Engine::CHUNK_PADDING, Engine::CHUNK_PADDING, Engine::CHUNK_PADDING);
+		surfConsts.range = effectiveSize;
+		vkCmdPushConstants(commandBuffer, analysisPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(SurfaceAnalysisConstants), &surfConsts);
+		vkCmdDispatch(commandBuffer,
+			(uint32_t)std::ceilf((surfConsts.range.x + 1) / 4.0f),
+			(uint32_t)std::ceilf((surfConsts.range.y + 1) / 4.0f),
+			(uint32_t)std::ceilf((surfConsts.range.z + 1) / 4.0f));
+
+		bufferMemBs[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+		bufferMemBs[0].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+		bufferMemBs[1] = bufferMemBs[0];
+		bufferMemBs[1].buffer = staging->m_infoStaging.m_gpuHandle->m_buffer;
+		bufferMemBs[1].srcAccessMask = 0;
+		bufferMemBs[1].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+			0,
+			0, nullptr,
+			2, bufferMemBs.data(),
+			0, nullptr);
+		VkBufferCopy attribCopy = {};
+		attribCopy.size = sizeof(SurfaceAnalysisInfo);
+		attribCopy.dstOffset = 0;
+		attribCopy.srcOffset = 0;
+		vkCmdCopyBuffer(commandBuffer, staging->m_info.m_gpuHandle->m_buffer, staging->m_infoStaging.m_gpuHandle->m_buffer, 1, &attribCopy);
+
+		bufferMemBs[0].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+		bufferMemBs[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		bufferMemBs[1].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		bufferMemBs[1].dstAccessMask = VK_ACCESS_HOST_READ_BIT;
+		vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+			0,
+			0, nullptr,
+			2, bufferMemBs.data(),
+			0, nullptr);
+
+		vkCmdSetEvent(commandBuffer, staging->m_analysisCompleteEvent, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+	}
+	else if (staging->m_stage == CHUNK_STAGE_VOLUME_ANALYSIS)
+	{
+		if (vkGetEventStatus(device, staging->m_analysisCompleteEvent) == VK_EVENT_RESET)
 			return;
-		vkResetEvent(device, stage->m_analysisComplete);
+		vkResetEvent(device, staging->m_analysisCompleteEvent);
 
 		VmaAllocator allocator = instance->Allocator();
 		void* attribData;
-		vmaMapMemory(allocator, stage->m_attributesSB.m_gpuHandle->m_allocation, &attribData);
-		SurfaceAttributes surfaceAttribs = {};
-		std::memcpy(&surfaceAttribs, attribData, sizeof(SurfaceAttributes));
-		vmaUnmapMemory(allocator, stage->m_attributesSB.m_gpuHandle->m_allocation);
+		vmaMapMemory(allocator, staging->m_infoStaging.m_gpuHandle->m_allocation, &attribData);
+		SurfaceAnalysisInfo surfaceAttribs = {};
+		std::memcpy(&surfaceAttribs, attribData, sizeof(SurfaceAnalysisInfo));
+		vmaUnmapMemory(allocator, staging->m_infoStaging.m_gpuHandle->m_allocation);
 
 		if (surfaceAttribs.cellCount > 0)
 		{
-			stage->m_stage = CHUNK_STAGE_VISUAL_ASSEMBLY;
-			stage->m_vertexCount = surfaceAttribs.vertexCount;
-			stage->m_indexCount = surfaceAttribs.indexCount;
+			staging->m_stage = CHUNK_STAGE_VISUAL_ASSEMBLY;
+			staging->m_vertexCount = surfaceAttribs.vertexCount;
+			staging->m_indexCount = surfaceAttribs.indexCount;
+			staging->m_boundsMax = surfaceAttribs.max;
+			staging->m_boundsMin = surfaceAttribs.min;
 
-			stage->m_verticies.Dereference();
-			stage->m_verticies.m_byteCount = surfaceAttribs.vertexCount * 16LL;
-			stage->m_verticies.Allocate(instance);
+			staging->m_verticies.Dereference();
+			staging->m_verticies.m_byteCount = surfaceAttribs.vertexCount * 16LL;
+			staging->m_verticies.Allocate(instance);
 
-			stage->m_indicies.Dereference();
-			stage->m_indicies.m_byteCount = surfaceAttribs.indexCount * 4LL;
-			stage->m_indicies.Allocate(instance);
+			staging->m_indicies.Dereference();
+			staging->m_indicies.m_byteCount = surfaceAttribs.indexCount * 4LL;
+			staging->m_indicies.Allocate(instance);
 
-			VkDescriptorBufferInfo vertBI = { stage->m_verticies.m_gpuHandle->m_buffer, 0, VK_WHOLE_SIZE };
-			VkDescriptorBufferInfo idxsBI = { stage->m_indicies.m_gpuHandle->m_buffer, 0, VK_WHOLE_SIZE };
+			VkDescriptorBufferInfo vertBI = { staging->m_verticies.m_gpuHandle->m_buffer, 0, VK_WHOLE_SIZE };
+			VkDescriptorBufferInfo idxsBI = { staging->m_indicies.m_gpuHandle->m_buffer, 0, VK_WHOLE_SIZE };
 
 			std::vector<VkWriteDescriptorSet> descWrites(2);
 			descWrites[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
 			descWrites[0].descriptorCount = 1;
 			descWrites[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
 			descWrites[0].dstArrayElement = 0;
-			descWrites[0].dstBinding = 3;
-			descWrites[0].dstSet = stage->m_assemblyDSet;
+			descWrites[0].dstBinding = 0;
 			descWrites[0].pBufferInfo = &vertBI;
 			descWrites[1] = descWrites[0];
-			descWrites[1].dstBinding = 4;
+			descWrites[1].dstBinding = 1;
 			descWrites[1].pBufferInfo = &idxsBI;
-			vkUpdateDescriptorSets(device, 2, descWrites.data(), 0, nullptr);
 
 			VkPipeline assemblyPipeline;
 			VkPipelineLayout assemblyPipelineLayout;
 			instance->m_surfaceAssemblyPipeline.GetVkPipeline(assemblyPipeline, assemblyPipelineLayout);
 			vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, assemblyPipeline);
-			vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, assemblyPipelineLayout, 0, 1, &stage->m_assemblyDSet, 0, nullptr);
+			vkCmdPushDescriptorSet(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, assemblyPipelineLayout, 1, 2, descWrites.data());
+			vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, assemblyPipelineLayout, 0, 1, &staging->m_assemblyDSet, 0, nullptr);
+
 			SurfaceAssemblyConstants surfConsts = {};
 			surfConsts.base = glm::uvec3(Engine::CHUNK_PADDING, Engine::CHUNK_PADDING, Engine::CHUNK_PADDING);
 			surfConsts.offset = m_min;
-			surfConsts.scale = (m_max - m_min) / (float)Engine::CHUNK_SIZE;
+			surfConsts.scale = (m_max - m_min) / 
+				glm::vec3(staging->m_density.m_size.width, staging->m_density.m_size.height, staging->m_density.m_size.depth);
 			vkCmdPushConstants(commandBuffer, assemblyPipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(SurfaceAssemblyConstants), &surfConsts);
 			vkCmdDispatch(commandBuffer, (uint32_t)std::ceilf(surfaceAttribs.cellCount / 64.0f), 1, 1);
 
 			std::vector<VkBufferMemoryBarrier> bufferMemBs(2);
 			bufferMemBs[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-			bufferMemBs[0].buffer = stage->m_verticies.m_gpuHandle->m_buffer;
+			bufferMemBs[0].buffer = staging->m_verticies.m_gpuHandle->m_buffer;
 			bufferMemBs[0].srcQueueFamilyIndex = instance->m_computeQueueFamily;
 			bufferMemBs[0].dstQueueFamilyIndex = instance->m_instance.queueFamilyIndex;
 			bufferMemBs[0].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -245,8 +307,7 @@ void VoxelChunk::ProcessBuilding(Engine* instance, VkCommandBuffer commandBuffer
 			bufferMemBs[0].size = VK_WHOLE_SIZE;
 
 			bufferMemBs[1] = bufferMemBs[0];
-			bufferMemBs[1].buffer = stage->m_indicies.m_gpuHandle->m_buffer;
-			bufferMemBs[1].srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+			bufferMemBs[1].buffer = staging->m_indicies.m_gpuHandle->m_buffer;
 			bufferMemBs[1].dstAccessMask = VK_ACCESS_INDEX_READ_BIT;
 			vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,
 				0,
@@ -254,37 +315,52 @@ void VoxelChunk::ProcessBuilding(Engine* instance, VkCommandBuffer commandBuffer
 				2, bufferMemBs.data(),
 				0, nullptr);
 
-			stage->CmdClearAttributes(commandBuffer);
-			vkCmdSetEvent(commandBuffer, stage->m_assemblyComplete, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+			vkCmdSetEvent(commandBuffer, staging->m_assemblyCompleteEvent, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
 		}
 		else
 		{
-			stage->m_stage = CHUNK_STAGE_IDLE;
-			stage->CmdClearAttributes(commandBuffer);
-			ReleaseResources(instance, true, true);
+			//staging->m_density.Release(instance);
+			//staging->m_verticies.Release(instance);
+			//staging->m_indicies.Release(instance);
+			SAFE_TRASH(staging->m_density);
+			SAFE_TRASH(staging->m_verticies);
+			SAFE_TRASH(staging->m_indicies);
+			staging->m_stage = CHUNK_STAGE_IDLE;
+			ReleaseResources(instance, trash);
+			ReleaseSubResources(instance, trash);
 			m_built = true;
 		}
 	}
-	else if (stage->m_stage == CHUNK_STAGE_VISUAL_ASSEMBLY)
+	else if (staging->m_stage == CHUNK_STAGE_VISUAL_ASSEMBLY)
 	{
-		if (vkGetEventStatus(device, stage->m_assemblyComplete) == VK_EVENT_RESET)
+		if (vkGetEventStatus(device, staging->m_assemblyCompleteEvent) == VK_EVENT_RESET)
 			return;
-		vkResetEvent(device, stage->m_assemblyComplete);
+		vkResetEvent(device, staging->m_assemblyCompleteEvent);
 
-		m_vertexBuffer.Release(instance);
-		m_indexBuffer.Release(instance);
-		m_vertexBuffer = stage->m_verticies;
-		m_indexBuffer = stage->m_indicies;
-		m_vertexCount = stage->m_vertexCount;
-		m_indexCount = stage->m_indexCount;
-		stage->m_verticies.Dereference();
-		stage->m_indicies.Dereference();
-		stage->m_stage = CHUNK_STAGE_IDLE;
+		glm::vec3 vSize = (m_max - m_min) /
+			glm::vec3(staging->m_density.m_size.width, staging->m_density.m_size.height, staging->m_density.m_size.depth);
+		m_boundMin = m_min + vSize * glm::vec3(staging->m_boundsMin);
+		m_boundMax = m_min + vSize * glm::vec3(staging->m_boundsMax + 1U);
+
+		//m_densityImage.Release(instance);
+		//m_vertexBuffer.Release(instance);
+		//m_indexBuffer.Release(instance);
+		SAFE_TRASH(m_densityImage);
+		SAFE_TRASH(m_vertexBuffer);
+		SAFE_TRASH(m_indexBuffer);
+		m_densityImage = staging->m_density;
+		m_vertexBuffer = staging->m_verticies;
+		m_indexBuffer = staging->m_indicies;
+		m_vertexCount = staging->m_vertexCount;
+		m_indexCount = staging->m_indexCount;
+		staging->m_density.m_gpuHandle = nullptr;
+		staging->m_verticies.Dereference();
+		staging->m_indicies.Dereference();
+		staging->m_stage = CHUNK_STAGE_IDLE;
 
 		instance->m_stagingResources->enqueue(m_stagingIdx);
-		m_stagingIdx = POOL_QUEUE_END;
+		m_stagingIdx = POOL_STACK_END;
 		m_built = true;
-		//LOG(instance->m_stagingResources->getPtrsString());
 	}
 }
 
@@ -294,20 +370,20 @@ ChunkStagingResources::ChunkStagingResources(Engine* instance, uint8_t size, uin
 
 	VkEventCreateInfo eventCI = {};
 	eventCI.sType = VK_STRUCTURE_TYPE_EVENT_CREATE_INFO;
-	vkCreateEvent(device, &eventCI, nullptr, &m_analysisComplete);
-	vkCreateEvent(device, &eventCI, nullptr, &m_assemblyComplete);
+	vkCreateEvent(device, &eventCI, nullptr, &m_analysisCompleteEvent);
+	vkCreateEvent(device, &eventCI, nullptr, &m_assemblyCompleteEvent);
 
-	m_attributes.m_bufferUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+	m_info.m_bufferUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
 		VK_BUFFER_USAGE_TRANSFER_DST_BIT |
 		VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-	m_attributes.m_memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY;
-	m_attributes.m_byteCount = sizeof(SurfaceAttributes);
-	m_attributes.Allocate(instance);
+	m_info.m_memoryUsage = VMA_MEMORY_USAGE_GPU_ONLY;
+	m_info.m_byteCount = sizeof(SurfaceAnalysisInfo);
+	m_info.Allocate(instance);
 	
-	m_attributesSB.m_bufferUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-	m_attributesSB.m_memoryUsage = VMA_MEMORY_USAGE_GPU_TO_CPU;
-	m_attributesSB.m_byteCount = sizeof(SurfaceAttributes);
-	m_attributesSB.Allocate(instance);
+	m_infoStaging.m_bufferUsage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	m_infoStaging.m_memoryUsage = VMA_MEMORY_USAGE_GPU_TO_CPU;
+	m_infoStaging.m_byteCount = sizeof(SurfaceAnalysisInfo);
+	m_infoStaging.Allocate(instance);
 
 	uint32_t sizeP1 = (uint32_t)size + 1;
 	m_indexMap.m_size = { sizeP1 ,sizeP1 ,sizeP1 };
@@ -359,7 +435,8 @@ void ChunkStagingResources::WriteDescriptors(Engine* instance,
 	VkDescriptorImageInfo colorMapW = { nullptr, m_colorMap.m_gpuHandle->m_view,  VK_IMAGE_LAYOUT_GENERAL };
 	VkDescriptorImageInfo indexMapW = { nullptr, m_indexMap.m_gpuHandle->m_view,  VK_IMAGE_LAYOUT_GENERAL };
 	VkDescriptorBufferInfo cellsW = { m_cells.m_gpuHandle->m_buffer, 0, VK_WHOLE_SIZE };
-	VkDescriptorBufferInfo attributesW = { m_attributes.m_gpuHandle->m_buffer, 0, VK_WHOLE_SIZE };
+	VkDescriptorBufferInfo infoW = { m_info.m_gpuHandle->m_buffer, 0, VK_WHOLE_SIZE };
+	VkDescriptorBufferInfo cellCountW = { m_info.m_gpuHandle->m_buffer, 0, sizeof(uint32_t) };
 
 	std::vector<VkWriteDescriptorSet> writes(9);
 	//Form: Color map
@@ -386,28 +463,23 @@ void ChunkStagingResources::WriteDescriptors(Engine* instance,
 	writes[3].dstBinding = 2;
 	writes[3].pImageInfo = nullptr;
 	writes[3].pBufferInfo = &cellsW;
-	//Attributes
+	//Info
 	writes[4] = writes[3];
 	writes[4].dstBinding = 3;
-	writes[4].pBufferInfo = &attributesW;
+	writes[4].pBufferInfo = &infoW;
 	//Assembly: Color map
 	writes[5] = writes[1];
 	writes[5].dstSet = m_assemblyDSet;
 	//Index map
-	writes[6] = writes[5];
-	writes[6].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;// Read only
-	writes[6].dstBinding = 1;
-	writes[6].pImageInfo = &indexMapW;
+	writes[6] = writes[2];
+	writes[6].dstSet = m_assemblyDSet;
 	//Cells
-	writes[7] = writes[5];
-	writes[7].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;// Read only
-	writes[7].dstBinding = 2;
-	writes[7].pImageInfo = nullptr;
-	writes[7].pBufferInfo = &cellsW;
-	//Vertex(3)/Index(4) buffers
-	writes[8] = writes[7];
-	writes[8].dstBinding = 5;
-	writes[8].pBufferInfo = &attributesW;
+	writes[7] = writes[3];
+	writes[7].dstSet = m_assemblyDSet;
+	//CellCount
+	writes[8] = writes[4];
+	writes[8].dstSet = m_assemblyDSet;
+	writes[8].pBufferInfo = &cellCountW;
 	
 	vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 }
@@ -420,7 +492,7 @@ void ChunkStagingResources::GetImageTransferBarriers(VkImageMemoryBarrier& color
 	colorBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	colorBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	colorBarrier.srcAccessMask = 0;
-	colorBarrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+	colorBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 	colorBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	colorBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
 	colorBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -433,65 +505,74 @@ void ChunkStagingResources::GetImageTransferBarriers(VkImageMemoryBarrier& color
 	indexBarrier.image = m_indexMap.m_gpuHandle->m_image;
 }
 
-void ChunkStagingResources::CmdPrepare(VkCommandBuffer commandBuffer)
+bool ChunkStagingResources::Ready(Engine* instance, VkCommandBuffer commandBuffer)
 {
-	if (m_stage == CHUNK_STAGE_VOLUME_ANALYSIS)
+	VkDevice device = instance->Device();
+	if (m_reset)
 	{
-		vkCmdWaitEvents(commandBuffer, 1, &m_analysisComplete,
-			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-			0, nullptr,
-			0, nullptr,
-			0, nullptr);
-		vkCmdResetEvent(commandBuffer, m_analysisComplete, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
-		CmdClearAttributes(commandBuffer);
+		if (m_stage == CHUNK_STAGE_VOLUME_ANALYSIS)
+		{
+			if (vkGetEventStatus(device, m_analysisCompleteEvent) == VK_EVENT_RESET)
+				return false;
+			vkResetEvent(device, m_analysisCompleteEvent);
+		}
+		else if (m_stage == CHUNK_STAGE_VISUAL_ASSEMBLY)
+		{
+			if (vkGetEventStatus(device, m_assemblyCompleteEvent) == VK_EVENT_RESET)
+				return false;
+			vkResetEvent(device, m_assemblyCompleteEvent);
+			m_verticies.Release(instance);
+			m_indicies.Release(instance);
+			m_density.Release(instance);
+		}
+		m_stage = CHUNK_STAGE_IDLE;
+		m_reset = false;
 	}
-	else if (m_stage == CHUNK_STAGE_VISUAL_ASSEMBLY)
-	{
-		vkCmdWaitEvents(commandBuffer, 1, &m_assemblyComplete,
-			VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-			0, nullptr,
-			0, nullptr,
-			0, nullptr);
-		vkCmdResetEvent(commandBuffer, m_assemblyComplete, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
-		CmdClearAttributes(commandBuffer);
-	}
-	m_stage = CHUNK_STAGE_IDLE;
-}
-
-void ChunkStagingResources::CmdClearAttributes(VkCommandBuffer commandBuffer)
-{
-	VkBufferMemoryBarrier memB = {};
-	memB.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-	memB.buffer = m_attributes.m_gpuHandle->m_buffer;
-	memB.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	memB.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	memB.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-	memB.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-	memB.offset = 0;
-	memB.size = VK_WHOLE_SIZE;
-	vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-		0,
-		0, nullptr,
-		1, &memB,
-		0, nullptr);
-	vkCmdFillBuffer(commandBuffer, memB.buffer, 0, VK_WHOLE_SIZE, 0);
-	memB.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-	memB.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-	vkCmdPipelineBarrier(commandBuffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-		0,
-		0, nullptr,
-		1, &memB,
-		0, nullptr);
+	return true;
 }
 
 void ChunkStagingResources::Deallocate(Engine* instance)
 {
 	VkDevice device = instance->Device();
-	vkDestroyEvent(device, m_analysisComplete, nullptr);
-	vkDestroyEvent(device, m_assemblyComplete, nullptr);
+	vkDestroyEvent(device, m_analysisCompleteEvent, nullptr);
+	vkDestroyEvent(device, m_assemblyCompleteEvent, nullptr);
 	m_colorMap.m_gpuHandle->Deallocate(instance);
 	m_indexMap.m_gpuHandle->Deallocate(instance);
 	m_cells.m_gpuHandle->Deallocate(instance);
-	m_attributes.m_gpuHandle->Deallocate(instance);
-	m_attributesSB.m_gpuHandle->Deallocate(instance);
+	m_info.m_gpuHandle->Deallocate(instance);
+	m_infoStaging.m_gpuHandle->Deallocate(instance);
+#define SAFE_DEALLOC(res) if(res.m_gpuHandle) res.m_gpuHandle->Deallocate(instance)
+	SAFE_DEALLOC(m_verticies);
+	SAFE_DEALLOC(m_indicies);
+	SAFE_DEALLOC(m_density);
+#undef SAFE_DEALLOC
+}
+
+bool ChunkRenderPackage::FrustumTest(const glm::mat4x4 mvp)
+{
+	glm::vec4 corners[8] = {
+	mvp * glm::vec4(min, 1.0),//000
+	mvp * glm::vec4(max.x, min.y, min.z, 1.0),//100
+	mvp * glm::vec4(min.x, max.y, min.z, 1.0),//010
+	mvp * glm::vec4(max.x, max.y, min.z, 1.0),//110
+	mvp * glm::vec4(min.x, min.y, max.z, 1.0),//001
+	mvp * glm::vec4(max.x, min.y, max.z, 1.0),//101
+	mvp * glm::vec4(min.x, max.y, max.z, 1.0),//011
+	mvp * glm::vec4(max, 1.0),//111
+	};
+
+	glm::ivec3 bounds = {0,0,0};
+	for (int i = 0; i < 8; i++)
+	{
+		glm::vec4 v = corners[i];
+		if (v.x < -v.w) bounds.x++;
+		if (v.x > v.w) bounds.x--;
+		if (v.y < -v.w) bounds.y++;
+		if (v.y > v.w) bounds.y--;
+		if (v.z < 0.0f) bounds.z++;
+		if (v.z > v.w) bounds.z--;
+	}
+	if (std::abs(bounds.x) == 8 || std::abs(bounds.y) == 8 || std::abs(bounds.z) == 8)
+		return false;
+	return true;
 }

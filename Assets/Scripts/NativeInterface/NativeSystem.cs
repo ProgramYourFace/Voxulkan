@@ -21,8 +21,11 @@ namespace Voxulkan
         }
 
         VoxelSystem m_voxelSystem;
-        IntPtr m_nativeInstance;
-        byte m_queueCount;
+        IntPtr m_nativeInstance = IntPtr.Zero;
+        byte m_queueCount = 0;
+
+        JobHandle m_GCJob;
+
         protected override void OnCreate()
         {
             Native.CreateVoxulkanInstance(ref m_nativeInstance);
@@ -48,7 +51,7 @@ namespace Voxulkan
             m_voxelSystem.OnNativeInitialized(this);
         }
 
-        protected override void OnDestroy()
+        protected override void OnStopRunning()
         {
             m_voxelSystem.OnNativeDeinitialized();
             Native.DestroyVoxulkanInstance(ref m_nativeInstance);
@@ -58,13 +61,15 @@ namespace Voxulkan
         {
             if (m_nativeInstance != IntPtr.Zero)
             {
-                inputDeps = new InvokeGCJob() { instance = m_nativeInstance }.Schedule(inputDeps);//TODO: Maybe scedule less frequently
+                m_GCJob = new InvokeGCJob() { instance = m_nativeInstance }.Schedule(inputDeps);
+                return m_GCJob;
             }
             return inputDeps;
         }
 
         public IntPtr NativeInstance { get { return m_nativeInstance; } }
         public byte QueueCount { get { return m_queueCount; } }
+        public JobHandle GCJob { get { return m_GCJob; } }
         public static NativeSystem Active { get { return World.Active.GetExistingSystem<NativeSystem>(); } }
     }
 }

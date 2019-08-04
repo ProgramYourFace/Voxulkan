@@ -41,7 +41,9 @@ namespace Voxulkan
             uint materialCount);
 
         [DllImport(DLL)]
-        public static extern void SubmitRender(IntPtr instance);
+        public static extern void QueryOcclusion(IntPtr instance, IntPtr camera, byte workerIndex);
+        [DllImport(DLL)]
+        public static extern void ClearRender(IntPtr instance);
         [DllImport(DLL)]
         public static extern void SubmitQueue(IntPtr instance, byte queueIndex);
         [DllImport(DLL)]
@@ -59,15 +61,19 @@ namespace Voxulkan
         [DllImport(DLL)]
         public static extern IntPtr CreateVoxelBody(Vector3 min, Vector3 max);
         [DllImport(DLL)]
-        public static extern void DestroyVoxelBody(IntPtr instance, ref IntPtr voxelBody);
+        public static extern void DestroyVoxelBody(IntPtr instance, IntPtr voxelBody);
         [DllImport(DLL)]
-        public static extern void VBTraverse(IntPtr instance, IntPtr vb, byte workerId, Vector3 observerPosition, float E, float leafSize, IntPtr form);
+        public static extern void SetVoxelBodyTransform(IntPtr voxelBody, Matrix4x4 transform);
+        [DllImport(DLL)]
+        public static extern unsafe void VBTraverse(IntPtr instance, IntPtr vb, byte workerId, Vector3 observerPosition, float E, float voxelSize, void* forms, uint formsCount, uint maxDepth = 10);
 
         [DllImport(DLL)]
         public static extern IntPtr CreateFormPipeline(IntPtr instance,
             byte[] formShader, int shaderSize);
         [DllImport(DLL)]
         public static extern void Release(IntPtr instance, ref IntPtr resource);
+        [DllImport(DLL)]
+        public static extern void ReleaseHandle(IntPtr instance, ref IntPtr resourceHandle);
 
         public static byte[] LoadShaderBytes(string shaderName)
         {

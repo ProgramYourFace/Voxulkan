@@ -9,10 +9,10 @@
 #define POOL_QUEUE_END 0xffff
 
 template <typename T>
-class LFPoolQueue {
+class LFPoolStack {
 public:
 
-	LFPoolQueue(uint16_t size)
+	LFPoolStack(uint16_t size)
 	{
 		m_size = size;
 		m_pool = new T[size];
@@ -24,7 +24,7 @@ public:
 		m_next.store(0);
 		m_last.store(lindex);
 	}
-	~LFPoolQueue()
+	~LFPoolStack()
 	{
 		delete[] m_pool;
 		delete[] m_ptrs;
@@ -60,49 +60,22 @@ public:
 
 	void enqueue(uint16_t index)
 	{
-		m_ptrs[index].store(POOL_QUEUE_END);
-
 		uint32_t unsafePtr = m_next.load();
 		uint32_t newPtr = 0;
 		VersionRef vrOld = {};
 		VersionRef vrNew = {};
-		memcpy(&vrOld, &unsafePtr, sizeof(uint32_t));
-		vrOld.ref = POOL_QUEUE_END;
-		memcpy(&unsafePtr, &vrOld, sizeof(uint32_t));
-		vrNew.ref = index;
-		vrNew.version = vrOld.version + 1;
-		memcpy(&newPtr, &vrNew, sizeof(uint32_t));
-		m_next.compare_exchange_strong(unsafePtr, newPtr);
+		do
+		{
+			memcpy(&vrOld, &unsafePtr, sizeof(uint32_t));
 
-		m_ptrs[m_last.exchange(index)].store(index);
+			vrNew.version = vrOld.version + 1;
+			vrNew.ref = index;
+			m_ptrs[index] = vrOld.ref;
 
+			memcpy(&newPtr, &vrNew, sizeof(uint32_t));
+		} while (!m_next.compare_exchange_weak(unsafePtr, newPtr));
 	}
 	
-	std::string getPtrsString()
-	{
-		std::stringstream ss;
-		ss << "[";
-		for (int i = 0; i < m_size;i++)
-		{
-			ss << m_ptrs[i].load();
-			if (i != m_size - 1)
-			{
-				ss << ",";
-			}
-		}
-		ss << "] \n";
-		struct VersionRef
-		{
-			uint16_t version;
-			uint16_t ref;
-		};
-		VersionRef vrOld = {};
-		uint32_t t = m_next.load();
-		memcpy(&vrOld, &t, sizeof(uint32_t));
-		ss << vrOld.ref << "-"<< m_last.load();
-		return ss.str();
-	}
-
 	inline T* data() { return m_pool; }
 
 	uint16_t size() { return m_size; }
@@ -114,5 +87,4 @@ private:
 	std::atomic<uint16_t>* m_ptrs;
 
 	std::atomic<uint32_t> m_next;
-	std::atomic<uint16_t> m_last;
 };
