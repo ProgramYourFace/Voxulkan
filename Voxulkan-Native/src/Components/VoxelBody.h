@@ -21,7 +21,7 @@ class VoxelBody
 public:
 	VoxelBody(const glm::vec3& min, const glm::vec3& max);
 	
-	void Traverse(Engine* instance, uint8_t workerID, const glm::vec3& observerPosition, float E, float voxelSize, BodyForm* forms, uint32_t formsCount, uint32_t maxDepth = 10);
+	void Traverse(Engine* instance, const glm::vec3& observerPosition, float E, float voxelSize, BodyForm* forms, uint32_t formsCount, uint32_t maxDepth = 10);
 	void Deallocate(Engine* instance);
 
 	volatile glm::mat4x4 m_transform = {};

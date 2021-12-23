@@ -7,22 +7,13 @@
 #include "Resources/CommandBufferHandle.h"
 #include "Components/VoxelBody.h"
 #include "Containers/MutexList.h"
-#include "Containers/LFPoolStack.h"
+#include "Containers/MPMCQueue.h"
 #include "Camera.h"
 #include <map>
 #include <atomic>
 #include <glm/mat4x4.hpp>
 
 class VoxelBody;
-
-typedef struct QueueResource
-{
-	VkQueue m_queue = nullptr;
-	VkFence* m_fences = nullptr;
-	volatile uint8_t m_currentCMDB = 0;
-	uint8_t m_workerStart = 0xFF;
-	uint8_t m_workerEnd = 0xFF;
-} QueueResource;
 
 typedef struct WorkerResource
 {
@@ -31,10 +22,18 @@ typedef struct WorkerResource
 	std::vector<VkCommandBuffer> m_computeCMDBs = {};
 	VkCommandPool m_queryCMDPool = nullptr;
 	VkCommandBuffer m_queryCMDB = nullptr;
-	VkFence m_queryFence;
-	VkEvent m_queryEvent;
+	VkFence m_queryFence = nullptr;
+	VkEvent m_queryEvent = nullptr;
 	uint8_t m_queueIndex = 0xFF;
 } WorkerResource;
+
+typedef struct QueueResource
+{
+	VkQueue m_queue = nullptr;
+	VkFence* m_fences = nullptr;
+	volatile uint8_t m_currentCMDB = 0;
+	std::vector<WorkerResource*> m_workers;
+} QueueResource;
 
 class Engine
 {
@@ -56,7 +55,7 @@ public:
 	inline uint8_t GetQueueCount() { return m_queueCount; };
 
 	void SubmitQueue(uint8_t queueIndex);
-	void QueryOcclusion(Camera* camera, uint8_t workerIndex);
+	void QueryOcclusion(Camera* camera);
 	void ClearRender();
 	void Draw(Camera* camera);
 	ComputePipeline* CreateFormPipeline(const std::vector<char>& shader);
@@ -108,15 +107,14 @@ private:
 	VkQueue m_occlusionQueue;
 	std::mutex m_occlusionLock;
 
-	WorkerResource* m_workers = nullptr;
-	uint8_t m_workerCount = 0;
+	MPMCQueue<WorkerResource*>* m_workers = nullptr;
 
 	QueueResource* m_queues = nullptr;
 	uint8_t m_queueCount = 0;
 
 	uint32_t m_computeQueueFamily = 0;
 
-	LFPoolStack<ChunkStagingResources*>* m_stagingResources = nullptr;
+	MPMCQueue<ChunkStagingResources*>* m_stagingResources = nullptr;
 	VkDescriptorPool m_stagingDescriptorPool = nullptr;
 
 #define SAFE_DUMP_MARGIN 10

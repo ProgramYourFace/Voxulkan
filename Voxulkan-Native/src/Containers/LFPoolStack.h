@@ -1,12 +1,9 @@
 #pragma once
 #include <atomic>
-#include <string>
-#include <sstream>
 
-#ifdef  END
-#undef END
+#ifndef  POOL_END
+#define POOL_END 0xffff
 #endif
-#define POOL_STACK_END 0xffff
 
 template <typename T>
 class LFPoolStack {
@@ -20,13 +17,22 @@ public:
 		uint16_t lindex = size - 1;
 		for (uint16_t i = 0; i < lindex; i++)
 			m_ptrs[i].store(i + 1);
-		m_ptrs[lindex].store(POOL_STACK_END);
+		m_ptrs[lindex].store(POOL_END);
 		m_next.store(0);
 	}
+
+	LFPoolStack()
+	{
+		m_size = 0;
+		m_pool = nullptr;
+		m_ptrs = nullptr;
+		m_next = 0;
+	}
+
 	~LFPoolStack()
 	{
-		delete[] m_pool;
-		delete[] m_ptrs;
+		if(m_pool) delete[] m_pool;
+		if(m_ptrs) delete[] m_ptrs;
 	}
 
 	struct VersionRef
@@ -45,8 +51,8 @@ public:
 		{
 			memcpy(&vrOld, &unsafePtr, sizeof(uint32_t));
 
-			if (vrOld.ref == POOL_STACK_END)
-				return POOL_STACK_END;
+			if (vrOld.ref == POOL_END)
+				return POOL_END;
 
 			vrNew.version = vrOld.version + 1;
 			vrNew.ref = m_ptrs[vrOld.ref].load();
@@ -78,7 +84,7 @@ public:
 	inline T* data() { return m_pool; }
 
 	uint16_t size() { return m_size; }
-	T& operator[](const int index) { return m_pool[index]; }
+	T& operator[](const uint16_t index) { return m_pool[index]; }
 
 private:
 	uint16_t m_size;

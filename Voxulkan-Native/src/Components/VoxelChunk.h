@@ -20,7 +20,7 @@ struct ChunkRenderPackage
 		return distance < rhs.distance;
 	}
 
-	bool FrustumTest(const glm::mat4x4 mvp);
+	static bool FrustumTest(const glm::mat4x4& mvp, const glm::vec3& min, const glm::vec3& max);
 };
 
 struct SurfaceAnalysisInfo
@@ -68,46 +68,6 @@ struct SurfaceAssemblyConstants
 	alignas(16)glm::vec3 scale;
 };
 
-struct VoxelChunk
-{
-	friend class VoxelBody;
-
-	VoxelChunk();
-
-	glm::vec3 m_min = {};
-	glm::vec3 m_max = {};
-	std::vector<VoxelChunk> m_subChunks = {};
-
-	GPUImage m_densityImage = {};
-	GPUBuffer m_indexBuffer = {};
-	GPUBuffer m_vertexBuffer = {};
-	uint32_t m_vertexCount = 0;
-	uint32_t m_indexCount = 0;
-	glm::vec3 m_boundMin = {};
-	glm::vec3 m_boundMax = {};
-
-	void SetMeshData(const GPUBuffer& vertexBuffer, const GPUBuffer& indexBuffer, uint32_t vertexCount, uint32_t indexCount);
-	void ReleaseResources(Engine* instance, std::vector<GPUResourceHandle*>& trash);
-	void ReleaseStaging(Engine* instance);
-	void ReleaseSubResources(Engine* instance, std::vector<GPUResourceHandle*>& trash);
-	void AllocateVolume(Engine* instance, const glm::uvec3& size);
-	inline void UpdateDistance(glm::vec3 observerPosition)
-	{
-		glm::vec3 delta = observerPosition - glm::clamp(observerPosition, m_min, m_max);
-		m_distance = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
-	}
-	bool operator<(const VoxelChunk& rhs)const
-	{
-		return m_distance < rhs.m_distance;
-	}
-private:
-	void Build(Engine* instance, VkCommandBuffer commandBuffer, float voxelSize, BodyForm* forms, uint32_t formsCount, std::vector<GPUResourceHandle*>& trash);
-
-	bool m_built = false;
-	uint16_t m_stagingIdx = 0xFFFF;
-	float m_distance = 0.0f;
-};
-
 typedef enum ChunkStage
 {
 	CHUNK_STAGE_IDLE = 0,
@@ -153,4 +113,44 @@ struct ChunkStagingResources : public GPUResourceHandle
 	inline void Reset() { m_reset = true; }
 private:
 	bool m_reset = false;
+};
+
+struct VoxelChunk
+{
+	friend class VoxelBody;
+
+	VoxelChunk();
+
+	glm::vec3 m_min = {};
+	glm::vec3 m_max = {};
+	std::vector<VoxelChunk> m_subChunks = {};
+
+	GPUImage m_densityImage = {};
+	GPUBuffer m_indexBuffer = {};
+	GPUBuffer m_vertexBuffer = {};
+	uint32_t m_vertexCount = 0;
+	uint32_t m_indexCount = 0;
+	glm::vec3 m_boundMin = {};
+	glm::vec3 m_boundMax = {};
+
+	void SetMeshData(const GPUBuffer& vertexBuffer, const GPUBuffer& indexBuffer, uint32_t vertexCount, uint32_t indexCount);
+	void ReleaseResources(Engine* instance, std::vector<GPUResourceHandle*>& trash);
+	void ReleaseStaging(Engine* instance);
+	void ReleaseSubResources(Engine* instance, std::vector<GPUResourceHandle*>& trash);
+	void AllocateVolume(Engine* instance, const glm::uvec3& size);
+	inline void UpdateDistance(glm::vec3 observerPosition)
+	{
+		glm::vec3 delta = observerPosition - glm::clamp(observerPosition, m_min, m_max);
+		m_distance = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
+	}
+	bool operator<(const VoxelChunk& rhs)const
+	{
+		return m_distance < rhs.m_distance;
+	}
+private:
+	void Build(Engine* instance, VkCommandBuffer commandBuffer, float voxelSize, BodyForm* forms, uint32_t formsCount, std::vector<GPUResourceHandle*>& trash);
+
+	bool m_built = false;
+	ChunkStagingResources* m_staging = nullptr;
+	float m_distance = 0.0f;
 };

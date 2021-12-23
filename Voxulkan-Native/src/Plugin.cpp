@@ -69,6 +69,7 @@ static void UNITY_INTERFACE_API OnGraphicsDeviceEvent(UnityGfxDeviceEventType ev
 	case kUnityGfxDeviceEventInitialize:
 	{
 		LOG("GFX Device Event Initialized");
+		
 		UnityVulkanPluginEventConfig eventConfig;
 		eventConfig.graphicsQueueAccess = kUnityVulkanGraphicsQueueAccess_DontCare;
 		eventConfig.renderPassPrecondition = kUnityVulkanRenderPass_EnsureInside;
@@ -91,8 +92,8 @@ extern "C" void UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API UnityPluginLoad(IUnit
 {
 	s_Graphics = unityInterfaces->Get<IUnityGraphics>();
 	s_Graphics->RegisterDeviceEventCallback(OnGraphicsDeviceEvent);
-	s_Vulkan = unityInterfaces->Get<IUnityGraphicsVulkan>();
-	s_Vulkan->InterceptInitialization(InterceptVulkanInitialization, nullptr);
+	//s_Vulkan = unityInterfaces->Get<IUnityGraphicsVulkan>();
+	//s_Vulkan->InterceptInitialization(InterceptVulkanInitialization, nullptr);
 }
 
 // Unity plugin unload event

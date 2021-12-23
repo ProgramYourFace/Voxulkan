@@ -47,10 +47,11 @@ void VoxelBody::RenderDanglingBranches(Engine* instance, VoxelChunk& chunk, std:
 }
 
 
-void VoxelBody::Traverse(Engine* instance, uint8_t workerID, const glm::vec3& observerPosition, float E, float voxelSize, BodyForm* forms, uint32_t formsCount, uint32_t maxDepth)
+void VoxelBody::Traverse(Engine* instance, const glm::vec3& observerPosition, float E, float voxelSize, BodyForm* forms, uint32_t formsCount, uint32_t maxDepth)
 {
-	WorkerResource& worker = instance->m_workers[workerID];
-	QueueResource& queue = instance->m_queues[worker.m_queueIndex];
+	WorkerResource* worker;
+	instance->m_workers->pop(worker);
+	QueueResource& queue = instance->m_queues[worker->m_queueIndex];
 
 	std::vector<GPUResourceHandle*>& trash = m_trash[queue.m_currentCMDB];
 	instance->DestroyResources(trash);
@@ -64,15 +65,15 @@ void VoxelBody::Traverse(Engine* instance, uint8_t workerID, const glm::vec3& ob
 	VkCommandBuffer cmdb = nullptr;
 	if (vkWaitForFences(instance->Device(), 1, &queue.m_fences[queue.m_currentCMDB], VK_TRUE, ~0ULL) == VK_SUCCESS)
 	{
-		cmdb = worker.m_computeCMDBs[queue.m_currentCMDB];
+		cmdb = worker->m_computeCMDBs[queue.m_currentCMDB];
 
-		if (!worker.m_recordingCmds)
+		if (!worker->m_recordingCmds)
 		{
 			VkCommandBufferBeginInfo beginI = {};
 			beginI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 			beginI.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 			VK_CALL(vkBeginCommandBuffer(cmdb, &beginI));
-			worker.m_recordingCmds = true;
+			worker->m_recordingCmds = true;
 		}
 	}
 
@@ -221,6 +222,8 @@ void VoxelBody::Traverse(Engine* instance, uint8_t workerID, const glm::vec3& ob
 		nbrp.min = bodyMin;
 		nbrp.max = bodyMax;
 	}
+
+	instance->m_workers->push(worker);
 }
 
 void VoxelBody::Deallocate(Engine* instance)
@@ -253,8 +256,8 @@ EXPORT void DestroyVoxelBody(Engine* instance, VoxelBody* voxelBody)
 	}
 }
 
-EXPORT void VBTraverse(Engine* instance, VoxelBody* vb, uint8_t workerID, glm::vec3 observerPosition, float E, float voxelSize, BodyForm* forms, uint32_t formsCount, uint32_t maxDepth)
+EXPORT void VBTraverse(Engine* instance, VoxelBody* vb, glm::vec3 observerPosition, float E, float voxelSize, BodyForm* forms, uint32_t formsCount, uint32_t maxDepth)
 {
 	observerPosition = glm::inverse(const_cast<glm::mat4x4&>(vb->m_transform)) * glm::vec4(observerPosition, 1.0);
-	vb->Traverse(instance, workerID, observerPosition, E, voxelSize, forms, formsCount, maxDepth);
+	vb->Traverse(instance, observerPosition, E, voxelSize, forms, formsCount, maxDepth);
 }

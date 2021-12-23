@@ -37,7 +37,9 @@
     <ClInclude Include="src\Camera.h" />
     <ClInclude Include="src\Components\VoxelBody.h" />
     <ClInclude Include="src\Components\VoxelChunk.h" />
+    <ClInclude Include="src\Containers\LFPoolQueue.h" />
     <ClInclude Include="src\Containers\LFPoolStack.h" />
+    <ClInclude Include="src\Containers\MPMCQueue.h" />
     <ClInclude Include="src\Containers\MutexList.h" />
     <ClInclude Include="src\Containers\MutexQueue.h" />
     <ClInclude Include="src\Engine.h" />

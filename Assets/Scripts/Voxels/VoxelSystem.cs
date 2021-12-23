@@ -31,9 +31,6 @@ namespace Voxulkan
             [NativeDisableParallelForRestriction]
             public BufferFromEntity<BodyForm> m_formsBuffers;
 
-            [NativeSetThreadIndex]
-            int m_ThreadIndex;
-
             public void Execute(int index)
             {
                 Entity entity = m_entities[index];
@@ -46,12 +43,6 @@ namespace Voxulkan
                 }
                 else
                 {
-                    m_ThreadIndex--;
-                    if (m_ThreadIndex >= Environment.ProcessorCount || m_ThreadIndex < 0)
-                    {
-                        Debug.Log("Thread out of range: " + m_ThreadIndex);
-                        return;
-                    }
                     DynamicBuffer<BodyForm> forms = m_formsBuffers[entity];
                     if (forms.Length == 0)
                         return;
@@ -59,7 +50,6 @@ namespace Voxulkan
                     {
                         Native.VBTraverse(m_instance,
                             vb.m_nativeBody,
-                            (byte)m_ThreadIndex,
                             m_observerPosition,
                             m_errorThreshold,
                             1.0f,
@@ -78,12 +68,9 @@ namespace Voxulkan
             [DeallocateOnJobCompletion]
             public NativeArray<NativeCameraComponent> m_cameras;
 
-            [NativeSetThreadIndex]
-            int m_ThreadIndex;
-
             public void Execute(int index)
             {
-                Native.QueryOcclusion(m_instance, m_cameras[index].cameraHandle, (byte)m_ThreadIndex);
+                Native.QueryOcclusion(m_instance, m_cameras[index].cameraHandle);
             }
         }
         struct ClearRenderJob : IJob
@@ -172,7 +159,7 @@ namespace Voxulkan
                 m_entities = vbQuery.ToEntityArray(Allocator.TempJob, out queryJob),
                 m_voxelBodies = GetComponentDataFromEntity<VoxelBody>(false),//TODO: See about making read only
                 m_formsBuffers = GetBufferFromEntity<BodyForm>(false)
-            }.Schedule(vbQuery.CalculateLength(), 1, JobHandle.CombineDependencies(inputDeps, queryJob));
+            }.Schedule(vbQuery.CalculateEntityCount(), 1, JobHandle.CombineDependencies(inputDeps, queryJob));
 
             m_cmdbSystem.AddJobHandleForProducer(traverseJob);
 
@@ -183,9 +170,9 @@ namespace Voxulkan
             {
                 m_instance = instance,
                 m_cameras = cameraQuery.ToComponentDataArray<NativeCameraComponent>(Allocator.TempJob, out queryJob)
-            }.Schedule(cameraQuery.CalculateLength(), 1, JobHandle.CombineDependencies(traverseJob, queryJob/*, m_nativeSystem.GCJob*/));
-            
-            JobHandle submitQueueJob = new SubmitQueuesJob()
+            }.Schedule(cameraQuery.CalculateEntityCount(), 1, JobHandle.CombineDependencies(traverseJob, queryJob));//, m_nativeSystem.GCJob
+
+    JobHandle submitQueueJob = new SubmitQueuesJob()
             {
                 m_instance = instance
             }.Schedule(m_nativeSystem.QueueCount, 1, traverseJob);

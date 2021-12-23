@@ -1,5 +1,4 @@
-﻿  SUCCESS: The process "Unity.exe" with PID 11912 has been terminated.
-  D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Shaders\Surface.vert
+﻿  D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Shaders\Surface.vert
   to D:\Projects_Unity\_GitHub\Voxulkan\Assets\Shaders\Resources\NativeShaders\Surface.vert.bytes
   D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Shaders\Surface.frag
   to D:\Projects_Unity\_GitHub\Voxulkan\Assets\Shaders\Resources\NativeShaders\Surface.frag.bytes
@@ -13,7 +12,20 @@
   to D:\Projects_Unity\_GitHub\Voxulkan\Assets\Shaders\Resources\NativeShaders\Surface.tesc.bytes
   D:\Projects_Unity\_GitHub\Voxulkan\Voxulkan-Native\src\Shaders\Surface.tese
   to D:\Projects_Unity\_GitHub\Voxulkan\Assets\Shaders\Resources\NativeShaders\Surface.tese.bytes
+  Camera.cpp
+  VoxelBody.cpp
+  VoxelChunk.cpp
   Engine.cpp
+  Plugin.cpp
+  ComputePipeline.cpp
+  GPUBuffer.cpp
+  CommandBufferHandle.cpp
+  GPUImage.cpp
+  Pipeline.cpp
+  RenderPipeline.cpp
+  GPUResource.cpp
+  VMA.cpp
+  Generating Code...
      Creating library D:\Projects_Unity\_GitHub\Voxulkan\x64\Debug\GfxPluginVoxulkan-Native.lib and object D:\Projects_Unity\_GitHub\Voxulkan\x64\Debug\GfxPluginVoxulkan-Native.exp
   Voxulkan-Native.vcxproj -> D:\Projects_Unity\_GitHub\Voxulkan\x64\Debug\GfxPluginVoxulkan-Native.dll
           1 file(s) copied.

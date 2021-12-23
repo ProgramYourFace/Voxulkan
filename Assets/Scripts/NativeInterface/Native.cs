@@ -41,7 +41,7 @@ namespace Voxulkan
             uint materialCount);
 
         [DllImport(DLL)]
-        public static extern void QueryOcclusion(IntPtr instance, IntPtr camera, byte workerIndex);
+        public static extern void QueryOcclusion(IntPtr instance, IntPtr camera);
         [DllImport(DLL)]
         public static extern void ClearRender(IntPtr instance);
         [DllImport(DLL)]
@@ -65,7 +65,7 @@ namespace Voxulkan
         [DllImport(DLL)]
         public static extern void SetVoxelBodyTransform(IntPtr voxelBody, Matrix4x4 transform);
         [DllImport(DLL)]
-        public static extern unsafe void VBTraverse(IntPtr instance, IntPtr vb, byte workerId, Vector3 observerPosition, float E, float voxelSize, void* forms, uint formsCount, uint maxDepth = 10);
+        public static extern unsafe void VBTraverse(IntPtr instance, IntPtr vb, Vector3 observerPosition, float E, float voxelSize, void* forms, uint formsCount, uint maxDepth = 10);
 
         [DllImport(DLL)]
         public static extern IntPtr CreateFormPipeline(IntPtr instance,

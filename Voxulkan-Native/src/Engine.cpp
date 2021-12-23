@@ -21,10 +21,10 @@ void Engine::RegisterQueues(std::vector<VkQueue> queues, const uint32_t& queueFa
 	m_occlusionQueue = occlusionQueue;
 	m_computeQueueFamily = queueFamily;
 	m_queueCount = static_cast<uint8_t>(queues.size());
-	m_workerCount = GetWorkerCount();
-	if (m_workerCount < m_queueCount)
+	uint8_t workerCount = GetWorkerCount();
+	if (workerCount < m_queueCount)
 	{
-		m_queueCount = m_workerCount;
+		m_queueCount = workerCount;
 		LOG("Queue count is some how larger than worker count!");
 	}
 
@@ -62,32 +62,38 @@ void Engine::RegisterQueues(std::vector<VkQueue> queues, const uint32_t& queueFa
 	}
 
 	m_queues = new QueueResource[m_queueCount];
-	m_workers = new WorkerResource[m_workerCount];
+	m_workers = new MPMCQueue<WorkerResource*>(workerCount);
 	uint8_t workerStart = 0;
+	uint8_t workerEnd = 0;
 	for (uint8_t i = 0; i < m_queueCount; i++)
 	{
 		QueueResource& qr = m_queues[i];
 		qr.m_queue = queues[i];
 		qr.m_currentCMDB = 0;
 		qr.m_fences = fences + i * (uint64_t)Engine::WORKER_CMDB_COUNT;
-		qr.m_workerStart = workerStart;
-		qr.m_workerEnd = ((i + 1) * m_workerCount) / m_queueCount;
-		workerStart = qr.m_workerEnd;
-		for (uint32_t j = qr.m_workerStart; j < qr.m_workerEnd; j++)
+		workerStart = workerEnd;
+		workerEnd = ((i + 1) * workerCount) / m_queueCount;
+
+		qr.m_workers.reserve(workerEnd - workerStart);
+
+		for (uint32_t j = workerStart; j < workerEnd; j++)
 		{
-			WorkerResource& wr = m_workers[j];
-			wr.m_queueIndex = i;
+			WorkerResource* wr = new WorkerResource();
+			wr->m_queueIndex = i;
 
-			VK_CALL(vkCreateCommandPool(m_instance.device, &computeCMDPoolInfo, nullptr, &wr.m_computeCMDPool));
-			workerCMDBInfo.commandPool = wr.m_computeCMDPool;
-			wr.m_computeCMDBs = std::vector<VkCommandBuffer>(workerCMDBInfo.commandBufferCount);
-			VK_CALL(vkAllocateCommandBuffers(m_instance.device, &workerCMDBInfo, wr.m_computeCMDBs.data()));
+			VK_CALL(vkCreateCommandPool(m_instance.device, &computeCMDPoolInfo, nullptr, &wr->m_computeCMDPool));
+			workerCMDBInfo.commandPool = wr->m_computeCMDPool;
+			wr->m_computeCMDBs = std::vector<VkCommandBuffer>(workerCMDBInfo.commandBufferCount);
+			VK_CALL(vkAllocateCommandBuffers(m_instance.device, &workerCMDBInfo, wr->m_computeCMDBs.data()));
 
-			VK_CALL(vkCreateCommandPool(m_instance.device, &renderCMDPoolInfo, nullptr, &wr.m_queryCMDPool));
-			renderCMDBInfo.commandPool = wr.m_queryCMDPool;
-			VK_CALL(vkAllocateCommandBuffers(m_instance.device, &renderCMDBInfo, &wr.m_queryCMDB));
-			VK_CALL(vkCreateFence(m_instance.device, &fenceCI, nullptr, &wr.m_queryFence));
-			VK_CALL(vkCreateEvent(m_instance.device, &eventCI, nullptr, &wr.m_queryEvent));
+			VK_CALL(vkCreateCommandPool(m_instance.device, &renderCMDPoolInfo, nullptr, &wr->m_queryCMDPool));
+			renderCMDBInfo.commandPool = wr->m_queryCMDPool;
+			VK_CALL(vkAllocateCommandBuffers(m_instance.device, &renderCMDBInfo, &wr->m_queryCMDB));
+			VK_CALL(vkCreateFence(m_instance.device, &fenceCI, nullptr, &wr->m_queryFence));
+			VK_CALL(vkCreateEvent(m_instance.device, &eventCI, nullptr, &wr->m_queryEvent));
+
+			m_workers->push(wr);
+			qr.m_workers.push_back(wr);
 		}
 	}
 }
@@ -158,7 +164,10 @@ void Engine::SetMaterialResources(void* attributesBuffer, uint32_t attribsByteCo
 		vmaFlushAllocation(m_allocator, sb.m_gpuHandle->m_allocation, 0, sb.m_byteCount);
 	}
 
-	VkCommandBuffer cmdb = m_workers[0].m_computeCMDBs[0];
+	WorkerResource* wr;
+	m_workers->pop(wr);
+
+	VkCommandBuffer cmdb = wr->m_computeCMDBs[0];
 	VkQueue q = m_queues[0].m_queue;
 	VkCommandBufferBeginInfo beginI = {};
 	beginI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -237,6 +246,8 @@ void Engine::SetMaterialResources(void* attributesBuffer, uint32_t attribsByteCo
 
 	sb.m_gpuHandle->Deallocate(this);
 	sb.Dereference();
+
+	m_workers->push(wr);
 }
 
 void Engine::InitializeResources()
@@ -255,6 +266,26 @@ void Engine::ReleaseResources()
 	ReleaseStagingResources();
 	ReleaseRenderPipelines();
 	ReleaseComputePipelines();
+
+	VkFence* fences = m_queues[0].m_fences;
+
+	for (int i = 0; i < m_queueCount * Engine::WORKER_CMDB_COUNT; i++)
+		vkDestroyFence(m_instance.device, fences[i], nullptr);
+
+	WorkerResource* wr;
+	while (m_workers->try_pop(wr))
+	{
+		vkDestroyCommandPool(m_instance.device, wr->m_computeCMDPool, nullptr);
+		vkDestroyCommandPool(m_instance.device, wr->m_queryCMDPool, nullptr);
+		vkDestroyEvent(m_instance.device, wr->m_queryEvent, nullptr);
+		vkDestroyFence(m_instance.device, wr->m_queryFence, nullptr);
+		delete wr;
+	}
+
+	delete m_workers;
+	delete[] fences;
+	delete[] m_queues;
+
 	m_surfaceAttributesBuffer.Release(this);
 	m_surfaceColorSpecTex.Release(this);
 	m_surfaceNrmHeightTex.Release(this);
@@ -267,17 +298,17 @@ void Engine::SubmitQueue(uint8_t queueIndex)
 {
 	QueueResource& qr = m_queues[queueIndex];
 
-	std::vector<VkCommandBuffer> cmds(qr.m_workerEnd - qr.m_workerStart);
+	std::vector<VkCommandBuffer> cmds(qr.m_workers.size());
 	uint32_t cmdbCount = 0;
-	for (int i = qr.m_workerStart; i < qr.m_workerEnd; i++)
+	for (size_t i = 0; i < qr.m_workers.size(); i++)
 	{
-		WorkerResource& wr = m_workers[i];
+		WorkerResource* wr = qr.m_workers[i];
 
-		if (wr.m_recordingCmds)
+		if (wr->m_recordingCmds)
 		{
-			VkCommandBuffer cmdb = wr.m_computeCMDBs[qr.m_currentCMDB];
+			VkCommandBuffer cmdb = wr->m_computeCMDBs[qr.m_currentCMDB];
 			VK_CALL(vkEndCommandBuffer(cmdb));
-			wr.m_recordingCmds = false;
+			wr->m_recordingCmds = false;
 			cmds[cmdbCount] = cmdb;
 			cmdbCount++;
 		}
@@ -295,26 +326,57 @@ void Engine::SubmitQueue(uint8_t queueIndex)
 	}
 }
 
-void Engine::QueryOcclusion(Camera* camera, uint8_t workerIndex)
+#include <chrono>
+typedef std::chrono::high_resolution_clock Clock;
+
+void Engine::QueryOcclusion(Camera* camera)
 {
+	size_t sortDur = 0;
+
+	auto t1 = Clock::now();
+
 	std::vector<BodyRenderPackage> render = m_render.vector();
 	CameraView cameraConsts = const_cast<CameraView&>(camera->m_view);
+	size_t bI = 0;
+
+	sortDur = std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() - t1).count();
 	for (size_t i = 0; i < render.size(); i++)
 	{
 		BodyRenderPackage& r = render[i];
-		glm::vec3 cPos = glm::inverse(const_cast<glm::mat4x4&>(r.transform)) * glm::vec4(cameraConsts.worldPosition, 1.0);
-		glm::vec3 delta = cPos - glm::clamp(cPos, r.min, r.max);
-		r.distance = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
-		
-		for (size_t j = 0; j < r.chunks.size(); j++)
+		glm::mat4x4 mvp = cameraConsts.viewProjection * r.transform;
+
+		if (ChunkRenderPackage::FrustumTest(mvp, r.min, r.max))
 		{
-			ChunkRenderPackage& chunk = r.chunks[j];
-			delta = cPos - glm::clamp(cPos, chunk.min, chunk.max);
-			chunk.distance = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
+			glm::vec3 cPos = glm::inverse(const_cast<glm::mat4x4&>(r.transform)) * glm::vec4(cameraConsts.worldPosition, 1.0);
+			glm::vec3 delta = cPos - glm::clamp(cPos, r.min, r.max);
+			r.distance = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
+
+			size_t cI = 0;
+			for (size_t j = 0; j < r.chunks.size(); j++)
+			{
+				ChunkRenderPackage& chunk = r.chunks[j];
+
+				if (ChunkRenderPackage::FrustumTest(mvp, chunk.min, chunk.max))
+				{
+					delta = cPos - glm::clamp(cPos, chunk.min, chunk.max);
+					chunk.distance = delta.x * delta.x + delta.y * delta.y + delta.z * delta.z;
+					if(cI != j) r.chunks[cI] = std::move(chunk);
+					cI++;
+				}
+			}
+
+			r.chunks.resize(cI);
+			std::sort(r.chunks.begin(), r.chunks.end());
+
+			if(bI != i) render[bI] = std::move(r);
+			bI++;
 		}
-		std::sort(r.chunks.begin(), r.chunks.end());
 	}
+
+	render.resize(bI);
 	std::sort(render.begin(), render.end());
+
+	LOG("Sort: " + std::to_string(sortDur));
 
 	camera->m_renderPackage.swap(render);
 }
@@ -323,9 +385,6 @@ void Engine::ClearRender()
 {
 	m_render.clear();
 }
-
-//#include <chrono>
-//typedef std::chrono::high_resolution_clock Clock;
 
 void Engine::Draw(Camera* camera)
 {
@@ -619,23 +678,10 @@ void Engine::InitializeStagingResources(uint8_t poolSize)
 
 	vkUpdateDescriptorSets(m_instance.device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
 
-	VkCommandPoolCreateInfo cmdPoolInfo = {};
-	cmdPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-	cmdPoolInfo.queueFamilyIndex = m_computeQueueFamily;
-	cmdPoolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+	WorkerResource* wr;
+	m_workers->pop(wr);
 
-	VkCommandPool cmdP = VK_NULL_HANDLE;
-	VK_CALL(vkCreateCommandPool(m_instance.device, &cmdPoolInfo, nullptr, &cmdP));
-
-	VkCommandBufferAllocateInfo cmdBAllocInfo = {};
-	cmdBAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-	cmdBAllocInfo.commandPool = cmdP;
-	cmdBAllocInfo.commandBufferCount = 1;
-	cmdBAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-
-	VkCommandBuffer cmdB;
-	VK_CALL(vkAllocateCommandBuffers(m_instance.device, &cmdBAllocInfo, &cmdB));
-
+	VkCommandBuffer cmdB = wr->m_computeCMDBs[0];
 	VkCommandBufferBeginInfo beginI = {};
 	beginI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	beginI.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -651,8 +697,8 @@ void Engine::InitializeStagingResources(uint8_t poolSize)
 	allocInfo.pSetLayouts = layouts.data();
 
 	std::vector<VkDescriptorSet> sets(3);
-	m_stagingResources = new LFPoolStack<ChunkStagingResources*>(poolSize);
-	for (uint32_t i = 0; i < m_stagingResources->size(); i++)
+	m_stagingResources = new MPMCQueue<ChunkStagingResources*>(poolSize);
+	for (uint32_t i = 0; i < m_stagingResources->capacity(); i++)
 	{
 		ChunkStagingResources* sRes = new ChunkStagingResources(this, CHUNK_SIZE, CHUNK_PADDING);
 
@@ -660,7 +706,7 @@ void Engine::InitializeStagingResources(uint8_t poolSize)
 		sRes->WriteDescriptors(this, sets[0], sets[1], sets[2]);
 		sRes->GetImageTransferBarriers(imageBarriers[i], imageBarriers[i + (uint64_t)poolSize]);
 
-		(*m_stagingResources)[i] = sRes;
+		m_stagingResources->push(sRes);
 	}
 
 	vkCmdPipelineBarrier(cmdB,
@@ -677,10 +723,10 @@ void Engine::InitializeStagingResources(uint8_t poolSize)
 	subInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 	subInfo.commandBufferCount = 1;
 	subInfo.pCommandBuffers = &cmdB;
-	vkQueueSubmit(queue, 1, &subInfo, nullptr);
-	vkQueueWaitIdle(queue);
+	VK_CALL(vkQueueSubmit(queue, 1, &subInfo, nullptr));
+	VK_CALL(vkQueueWaitIdle(queue));
 
-	vkDestroyCommandPool(m_instance.device, cmdP, nullptr);
+	m_workers->push(wr);
 }
 
 void Engine::ReleaseRenderPipelines()
@@ -702,34 +748,19 @@ void Engine::ReleaseComputePipelines()
 
 void Engine::ReleaseStagingResources()
 {
-	if (m_stagingResources == nullptr) return;
+	if (m_stagingResources == nullptr)
+		return;
 
-	std::vector<GPUResourceHandle*> resources(m_stagingResources->data(),
-		m_stagingResources->data() + m_stagingResources->size());
+	std::vector<GPUResourceHandle*> resources;
+
+	ChunkStagingResources* handle;
+	while (m_stagingResources->try_pop(handle)) { resources.push_back(handle); }
+
 	DestroyResources(resources);
 
 	vkDestroyDescriptorPool(m_instance.device, m_stagingDescriptorPool, nullptr);
 	SAFE_DEL(m_stagingResources);
-
-	VkFence* fences = m_queues[0].m_fences;
-
-	for (int i = 0; i < m_queueCount * Engine::WORKER_CMDB_COUNT; i++)
-		vkDestroyFence(m_instance.device, fences[i], nullptr);
-	for (int i = 0; i < m_workerCount; i++)
-	{
-		WorkerResource& wr = m_workers[i];
-		vkDestroyCommandPool(m_instance.device, wr.m_computeCMDPool, nullptr);
-		vkDestroyCommandPool(m_instance.device, wr.m_queryCMDPool, nullptr);
-		vkDestroyEvent(m_instance.device, wr.m_queryEvent, nullptr);
-		vkDestroyFence(m_instance.device, wr.m_queryFence, nullptr);
-	}
-
-	delete[] fences;
-
-	delete[] m_workers;
-	delete[] m_queues;
 }
-
 
 void Engine::GarbageCollect(const GCForce force)
 {
@@ -799,9 +830,9 @@ EXPORT uint8_t GetQueueCount(Engine* instance)
 	return instance->GetQueueCount();
 }
 
-EXPORT void QueryOcclusion(Engine* instance, Camera* camera, uint8_t workerIndex)
+EXPORT void QueryOcclusion(Engine* instance, Camera* camera)
 {
-	instance->QueryOcclusion(camera, workerIndex);
+	instance->QueryOcclusion(camera);
 }
 
 EXPORT void ClearRender(Engine* instance)
